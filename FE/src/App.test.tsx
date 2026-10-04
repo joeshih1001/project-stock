@@ -15,6 +15,14 @@ const defaultRequest = {
   initialCapital: 100000,
   allocation: 0.5,
   feeRate: 0,
+  sellFeeRate: 0,
+  feeDiscount: 1,
+  minFee: 0,
+  feeRounding: 'NONE',
+  productType: 'ETF',
+  lotSize: 1,
+  usedForTuning: 'UNKNOWN',
+  previouslyViewed: 'YES',
   slippageRate: 0,
   maxDrawdownWarningPct: 20,
 }
@@ -259,7 +267,7 @@ describe('App', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('這段期間沒有產生交易。')).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: '下載交易明細 CSV' }),
+      screen.getByRole('button', { name: '下載表格摘要 CSV' }),
     ).toBeDisabled()
 
     await waitFor(() => {
@@ -330,7 +338,7 @@ describe('App', () => {
     await screen.findByRole('option', { name: 'MA 趨勢策略' })
     await user.click(screen.getByRole('button', { name: /建立回測任務/ }))
     await screen.findByRole('heading', { name: '0050 回測結果' })
-    await user.click(screen.getByRole('button', { name: '下載交易明細 CSV' }))
+    await user.click(screen.getByRole('button', { name: '下載表格摘要 CSV' }))
 
     expect(createObjectURL).toHaveBeenCalledOnce()
     expect(createObjectURL.mock.calls[0][0].type).toBe('text/csv;charset=utf-8')

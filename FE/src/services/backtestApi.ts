@@ -138,6 +138,17 @@ export const getBacktestResult = async (
   )
 }
 
+export const backtestExportUrl = (
+  taskId: string,
+  kind:
+    | 'trades.csv'
+    | 'equity_daily.csv'
+    | 'benchmarks_daily.csv'
+    | 'summary.json'
+    | 'run_manifest.json',
+): string =>
+  `${getApiBaseUrl()}${BACKTESTS_PATH}/${normalizeTaskId(taskId)}/export/${kind}`
+
 export const cancelBacktest = async (
   taskId: string,
   signal?: AbortSignal,
@@ -379,6 +390,80 @@ const decodeRunBacktestRequest = (request: RunBacktestRequest): JsonRecord => {
     initialCapital,
     allocation,
     feeRate,
+    ...(record.sellFeeRate === undefined
+      ? {}
+      : {
+          sellFeeRate: readNumberInRange(
+            record.sellFeeRate,
+            '$.sellFeeRate',
+            context,
+            0,
+            0.1,
+          ),
+        }),
+    ...(record.feeDiscount === undefined
+      ? {}
+      : {
+          feeDiscount: readNumberInRange(
+            record.feeDiscount,
+            '$.feeDiscount',
+            context,
+            0,
+            1,
+          ),
+        }),
+    ...(record.minFee === undefined
+      ? {}
+      : {
+          minFee: readNumberInRange(
+            record.minFee,
+            '$.minFee',
+            context,
+            0,
+            Number.MAX_VALUE,
+          ),
+        }),
+    ...(record.feeRounding === undefined
+      ? {}
+      : {
+          feeRounding: readEnum(record.feeRounding, '$.feeRounding', context, [
+            'NONE',
+            'FLOOR',
+            'HALF_UP',
+          ] as const),
+        }),
+    ...(record.productType === undefined
+      ? {}
+      : {
+          productType: readEnum(record.productType, '$.productType', context, [
+            'ETF',
+            'STOCK',
+            'UNSPECIFIED',
+          ] as const),
+        }),
+    ...(record.lotSize === undefined
+      ? {}
+      : { lotSize: readPositiveInteger(record.lotSize, '$.lotSize', context) }),
+    ...(record.usedForTuning === undefined
+      ? {}
+      : {
+          usedForTuning: readEnum(
+            record.usedForTuning,
+            '$.usedForTuning',
+            context,
+            ['YES', 'NO', 'UNKNOWN'] as const,
+          ),
+        }),
+    ...(record.previouslyViewed === undefined
+      ? {}
+      : {
+          previouslyViewed: readEnum(
+            record.previouslyViewed,
+            '$.previouslyViewed',
+            context,
+            ['YES', 'NO', 'UNKNOWN'] as const,
+          ),
+        }),
     slippageRate,
     maxDrawdownWarningPct,
   }
@@ -581,6 +666,23 @@ const decodeBacktestResult = (
     config: decodeBacktestConfig(configRecord, context),
     data: decodeBacktestData(dataRecord, context),
     metrics: decodeBacktestMetrics(record.metrics, context),
+    ...(record.accountingStatus === undefined
+      ? {}
+      : {
+          accountingStatus: readNonEmptyString(
+            record.accountingStatus,
+            '$.accountingStatus',
+            context,
+          ),
+        }),
+    ...(record.noCostMetrics === undefined
+      ? {}
+      : {
+          noCostMetrics: decodeBacktestMetrics(record.noCostMetrics, context),
+        }),
+    ...(record.benchmarks === undefined
+      ? {}
+      : { benchmarks: decodeBenchmarks(record.benchmarks, context) }),
     equityCurve: decodeEquityCurve(record.equityCurve, context),
     trades: decodeBacktestTrades(record.trades, context),
     warnings: readStringArray(record.warnings, '$.warnings', context),
@@ -599,7 +701,41 @@ const decodeBacktestResult = (
   if (result.trades.length !== result.metrics.totalTrades) {
     failValidation(context, '$.trades', '長度與 metrics.totalTrades 一致的陣列')
   }
+  if (result.benchmarks) {
+    for (const [key, benchmark] of Object.entries(result.benchmarks)) {
+      if (
+        benchmark.equityCurve.length !== result.equityCurve.length ||
+        benchmark.equityCurve.some(
+          (point, index) => point.date !== result.equityCurve[index]?.date,
+        )
+      ) {
+        failValidation(
+          context,
+          `$.benchmarks.${key}.equityCurve`,
+          '與策略相同交易日的資產曲線',
+        )
+      }
+    }
+  }
   return result
+}
+
+const decodeBenchmarks = (
+  value: unknown,
+  context: ValidationContext,
+): NonNullable<BacktestResult['benchmarks']> => {
+  const record = readRecord(value, '$.benchmarks', context)
+  const decodeOne = (key: 'buyHold100' | 'buyHold50') => {
+    const entry = readRecord(record[key], `$.benchmarks.${key}`, context)
+    return {
+      metrics: decodeBacktestMetrics(entry.metrics, context),
+      equityCurve: decodeEquityCurve(entry.equityCurve, context),
+    }
+  }
+  return {
+    buyHold100: decodeOne('buyHold100'),
+    buyHold50: decodeOne('buyHold50'),
+  }
 }
 
 const decodeBacktestConfig = (
@@ -626,6 +762,65 @@ const decodeBacktestConfig = (
       context,
     ),
     feeRate: readFiniteNumber(record.feeRate, '$.config.feeRate', context),
+    ...(record.sellFeeRate === undefined
+      ? {}
+      : {
+          sellFeeRate: readFiniteNumber(
+            record.sellFeeRate,
+            '$.config.sellFeeRate',
+            context,
+          ),
+        }),
+    ...(record.feeDiscount === undefined
+      ? {}
+      : {
+          feeDiscount: readFiniteNumber(
+            record.feeDiscount,
+            '$.config.feeDiscount',
+            context,
+          ),
+        }),
+    ...(record.minFee === undefined
+      ? {}
+      : {
+          minFee: readFiniteNumber(record.minFee, '$.config.minFee', context),
+        }),
+    ...(record.feeRounding === undefined
+      ? {}
+      : {
+          feeRounding: readNonEmptyString(
+            record.feeRounding,
+            '$.config.feeRounding',
+            context,
+          ),
+        }),
+    ...(record.productType === undefined
+      ? {}
+      : {
+          productType: readNonEmptyString(
+            record.productType,
+            '$.config.productType',
+            context,
+          ),
+        }),
+    ...(record.lotSize === undefined
+      ? {}
+      : {
+          lotSize: readPositiveInteger(
+            record.lotSize,
+            '$.config.lotSize',
+            context,
+          ),
+        }),
+    ...(record.taxRate === undefined
+      ? {}
+      : {
+          taxRate: readFiniteNumber(
+            record.taxRate,
+            '$.config.taxRate',
+            context,
+          ),
+        }),
     slippageRate: readFiniteNumber(
       record.slippageRate,
       '$.config.slippageRate',
@@ -728,6 +923,15 @@ const decodeBacktestMetrics = (
       `${path}.finalMarketValue`,
       context,
     ),
+    ...(record.finalDividendReceivable === undefined
+      ? {}
+      : {
+          finalDividendReceivable: readFiniteNumber(
+            record.finalDividendReceivable,
+            `${path}.finalDividendReceivable`,
+            context,
+          ),
+        }),
     finalEquity: readFiniteNumber(
       record.finalEquity,
       `${path}.finalEquity`,
@@ -744,6 +948,15 @@ const decodeBacktestMetrics = (
       `${path}.unrealizedPnl`,
       context,
     ),
+    ...(record.unsettledClosedDividends === undefined
+      ? {}
+      : {
+          unsettledClosedDividends: readFiniteNumber(
+            record.unsettledClosedDividends,
+            `${path}.unsettledClosedDividends`,
+            context,
+          ),
+        }),
     totalReturnPct: readFiniteNumber(
       record.totalReturnPct,
       `${path}.totalReturnPct`,
@@ -760,6 +973,78 @@ const decodeBacktestMetrics = (
       context,
     ),
     totalFees: readFiniteNumber(record.totalFees, `${path}.totalFees`, context),
+    ...(record.totalTax === undefined
+      ? {}
+      : {
+          totalTax: readFiniteNumber(
+            record.totalTax,
+            `${path}.totalTax`,
+            context,
+          ),
+        }),
+    ...(record.totalDividendsReceived === undefined
+      ? {}
+      : {
+          totalDividendsReceived: readFiniteNumber(
+            record.totalDividendsReceived,
+            `${path}.totalDividendsReceived`,
+            context,
+          ),
+        }),
+    ...(record.totalSlippageCost === undefined
+      ? {}
+      : {
+          totalSlippageCost: readFiniteNumber(
+            record.totalSlippageCost,
+            `${path}.totalSlippageCost`,
+            context,
+          ),
+        }),
+    ...(record.peakDate === undefined
+      ? {}
+      : {
+          peakDate: readNullableIsoDate(
+            record.peakDate,
+            `${path}.peakDate`,
+            context,
+          ),
+        }),
+    ...(record.troughDate === undefined
+      ? {}
+      : {
+          troughDate: readNullableIsoDate(
+            record.troughDate,
+            `${path}.troughDate`,
+            context,
+          ),
+        }),
+    ...(record.recoveryDate === undefined
+      ? {}
+      : {
+          recoveryDate: readNullableIsoDate(
+            record.recoveryDate,
+            `${path}.recoveryDate`,
+            context,
+          ),
+        }),
+    ...(record.longestUnderwaterCalendarDays === undefined
+      ? {}
+      : {
+          longestUnderwaterCalendarDays: readNonNegativeInteger(
+            record.longestUnderwaterCalendarDays,
+            `${path}.longestUnderwaterCalendarDays`,
+            context,
+          ),
+        }),
+    ...(record.longestUnderwaterUnrecovered === undefined
+      ? {}
+      : {
+          longestUnderwaterUnrecovered: readBoolean(
+            record.longestUnderwaterUnrecovered,
+            `${path}.longestUnderwaterUnrecovered`,
+            context,
+          ),
+        }),
     totalTrades: readNonNegativeInteger(
       record.totalTrades,
       `${path}.totalTrades`,
@@ -864,6 +1149,15 @@ const decodeBacktestTrades = (
         'CLOSED',
       ] as const),
       shares: readPositiveInteger(record.shares, `${path}.shares`, context),
+      ...(record.entryShares === undefined
+        ? {}
+        : {
+            entryShares: readPositiveInteger(
+              record.entryShares,
+              `${path}.entryShares`,
+              context,
+            ),
+          }),
       entrySignalDate: readIsoDate(
         record.entrySignalDate,
         `${path}.entrySignalDate`,

@@ -42,6 +42,14 @@ export interface RunBacktestRequest {
   initialCapital: number
   allocation: number
   feeRate: number
+  sellFeeRate?: number
+  feeDiscount?: number
+  minFee?: number
+  feeRounding?: 'NONE' | 'FLOOR' | 'HALF_UP'
+  productType?: 'ETF' | 'STOCK' | 'UNSPECIFIED'
+  lotSize?: number
+  usedForTuning?: 'YES' | 'NO' | 'UNKNOWN'
+  previouslyViewed?: 'YES' | 'NO' | 'UNKNOWN'
   slippageRate: number
   maxDrawdownWarningPct: number
 }
@@ -100,6 +108,13 @@ export interface BacktestConfig {
   maPeriod: number
   allocation: number
   feeRate: number
+  sellFeeRate?: number
+  feeDiscount?: number
+  minFee?: number
+  feeRounding?: string
+  productType?: string
+  lotSize?: number
+  taxRate?: number
   slippageRate: number
   maxDrawdownWarningPct: number
   signalTiming: 'CLOSE'
@@ -129,14 +144,24 @@ export interface BacktestMetrics {
   initialCash: number
   finalCash: number
   finalMarketValue: number
+  finalDividendReceivable?: number
   finalEquity: number
   totalPnl: number
   realizedPnl: number
   unrealizedPnl: number
+  unsettledClosedDividends?: number
   totalReturnPct: number
   annualizedReturnPct: number | null
   maxDrawdownPct: number
   totalFees: number
+  totalTax?: number
+  totalSlippageCost?: number
+  totalDividendsReceived?: number
+  peakDate?: string | null
+  troughDate?: string | null
+  recoveryDate?: string | null
+  longestUnderwaterCalendarDays?: number
+  longestUnderwaterUnrecovered?: boolean
   totalTrades: number
   closedTrades: number
   openTrades: number
@@ -157,12 +182,18 @@ export interface BacktestEquityPoint {
   close: number
   movingAverage: number | null
   drawdownPct: number
+  highWaterMark?: number
+  dailyFees?: number
+  dailyTax?: number
+  dividendReceivable?: number
+  dividendsReceived?: number
 }
 
 export interface BacktestTrade {
   tradeId: number
   status: 'OPEN' | 'CLOSED'
   shares: number
+  entryShares?: number
   entrySignalDate: string
   entryDate: string
   entryPrice: number
@@ -195,6 +226,12 @@ export interface BacktestResult {
   config: BacktestConfig
   data: BacktestData
   metrics: BacktestMetrics
+  accountingStatus?: string
+  noCostMetrics?: BacktestMetrics
+  benchmarks?: {
+    buyHold100: { metrics: BacktestMetrics; equityCurve: BacktestEquityPoint[] }
+    buyHold50: { metrics: BacktestMetrics; equityCurve: BacktestEquityPoint[] }
+  }
   equityCurve: BacktestEquityPoint[]
   trades: BacktestTrade[]
   warnings: string[]

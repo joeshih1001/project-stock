@@ -53,6 +53,22 @@ export const BacktestForm = ({
     String((initialStrategy?.defaultParams.allocation ?? 0.5) * 100),
   )
   const [feeRatePct, setFeeRatePct] = useState('0')
+  const [sellFeeRatePct, setSellFeeRatePct] = useState('0')
+  const [feeDiscountPct, setFeeDiscountPct] = useState('100')
+  const [minFee, setMinFee] = useState('0')
+  const [lotSize, setLotSize] = useState('1')
+  const [feeRounding, setFeeRounding] = useState<'NONE' | 'FLOOR' | 'HALF_UP'>(
+    'NONE',
+  )
+  const [productType, setProductType] = useState<
+    'ETF' | 'STOCK' | 'UNSPECIFIED'
+  >('ETF')
+  const [usedForTuning, setUsedForTuning] = useState<'YES' | 'NO' | 'UNKNOWN'>(
+    'UNKNOWN',
+  )
+  const [previouslyViewed, setPreviouslyViewed] = useState<
+    'YES' | 'NO' | 'UNKNOWN'
+  >('YES')
   const [slippageRatePct, setSlippageRatePct] = useState('0')
   const [maxDrawdownWarningPct, setMaxDrawdownWarningPct] = useState('20')
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -101,6 +117,10 @@ export const BacktestForm = ({
     const capital = Number(initialCapital)
     const allocationPercent = Number(allocationPct)
     const feePercent = Number(feeRatePct)
+    const sellFeePercent = Number(sellFeeRatePct)
+    const discountPercent = Number(feeDiscountPct)
+    const minFeeValue = Number(minFee)
+    const lotSizeValue = Number(lotSize)
     const slippagePercent = Number(slippageRatePct)
     const drawdownPercent = Number(maxDrawdownWarningPct)
 
@@ -137,6 +157,22 @@ export const BacktestForm = ({
       nextErrors.feeRatePct = '單邊手續費率必須介於 0% 到 10%。'
     }
     if (
+      !Number.isFinite(sellFeePercent) ||
+      sellFeePercent < 0 ||
+      sellFeePercent > 10
+    )
+      nextErrors.sellFeeRatePct = '賣出手續費率必須介於 0% 到 10%。'
+    if (
+      !Number.isFinite(discountPercent) ||
+      discountPercent < 0 ||
+      discountPercent > 100
+    )
+      nextErrors.feeDiscountPct = '手續費折扣必須介於 0% 到 100%。'
+    if (!Number.isFinite(minFeeValue) || minFeeValue < 0)
+      nextErrors.minFee = '最低手續費不可小於 0。'
+    if (!Number.isInteger(lotSizeValue) || lotSizeValue < 1)
+      nextErrors.lotSize = '交易單位必須是正整數。'
+    if (
       !Number.isFinite(slippagePercent) ||
       slippagePercent < 0 ||
       slippagePercent > 10
@@ -166,6 +202,14 @@ export const BacktestForm = ({
       initialCapital: capital,
       allocation: allocationPercent / 100,
       feeRate: feePercent / 100,
+      sellFeeRate: sellFeePercent / 100,
+      feeDiscount: discountPercent / 100,
+      minFee: minFeeValue,
+      feeRounding,
+      productType,
+      lotSize: lotSizeValue,
+      usedForTuning,
+      previouslyViewed,
       slippageRate: slippagePercent / 100,
       maxDrawdownWarningPct: drawdownPercent,
     }
@@ -220,7 +264,14 @@ export const BacktestForm = ({
               autoComplete="off"
               value={symbol}
               onChange={(event) =>
-                updateField('symbol', () => setSymbol(event.target.value))
+                updateField('symbol', () => {
+                  setSymbol(event.target.value)
+                  setProductType(
+                    event.target.value.trim().toUpperCase() === '0050'
+                      ? 'ETF'
+                      : 'UNSPECIFIED',
+                  )
+                })
               }
               placeholder="例如 0050、2330 或 00687B.TWO"
               aria-invalid={Boolean(errors.symbol)}
@@ -422,7 +473,7 @@ export const BacktestForm = ({
           />
           <PercentField
             id="fee-rate"
-            label="單邊手續費率"
+            label="買進手續費率"
             value={feeRatePct}
             error={errors.feeRatePct}
             min="0"
@@ -430,6 +481,30 @@ export const BacktestForm = ({
             step="0.01"
             onChange={(value) =>
               updateField('feeRatePct', () => setFeeRatePct(value))
+            }
+          />
+          <PercentField
+            id="sell-fee-rate"
+            label="賣出手續費率"
+            value={sellFeeRatePct}
+            error={errors.sellFeeRatePct}
+            min="0"
+            max="10"
+            step="0.01"
+            onChange={(value) =>
+              updateField('sellFeeRatePct', () => setSellFeeRatePct(value))
+            }
+          />
+          <PercentField
+            id="fee-discount"
+            label="手續費折扣（100% 為無折扣）"
+            value={feeDiscountPct}
+            error={errors.feeDiscountPct}
+            min="0"
+            max="100"
+            step="1"
+            onChange={(value) =>
+              updateField('feeDiscountPct', () => setFeeDiscountPct(value))
             }
           />
           <PercentField
@@ -446,12 +521,138 @@ export const BacktestForm = ({
           />
         </div>
 
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            id="product-type"
+            label="商品種類"
+            input={
+              <select
+                id="product-type"
+                value={productType}
+                onChange={(event) =>
+                  updateField('productType', () =>
+                    setProductType(event.target.value as typeof productType),
+                  )
+                }
+                className="field-input mt-2"
+              >
+                <option value="ETF">ETF（賣出交易稅假設 0.1%）</option>
+                <option value="STOCK">股票（賣出交易稅假設 0.3%）</option>
+                <option value="UNSPECIFIED">未確認（稅率待補）</option>
+              </select>
+            }
+          />
+          <Field
+            id="fee-rounding"
+            label="手續費取整"
+            input={
+              <select
+                id="fee-rounding"
+                value={feeRounding}
+                onChange={(event) =>
+                  updateField('feeRounding', () =>
+                    setFeeRounding(event.target.value as typeof feeRounding),
+                  )
+                }
+                className="field-input mt-2"
+              >
+                <option value="NONE">保留精度</option>
+                <option value="FLOOR">無條件捨去至元</option>
+                <option value="HALF_UP">四捨五入至元</option>
+              </select>
+            }
+          />
+          <Field
+            id="min-fee"
+            label="單筆最低手續費（TWD）"
+            error={errors.minFee}
+            input={
+              <input
+                id="min-fee"
+                type="number"
+                min="0"
+                step="1"
+                value={minFee}
+                onChange={(event) =>
+                  updateField('minFee', () => setMinFee(event.target.value))
+                }
+                className="field-input mt-2"
+              />
+            }
+          />
+          <Field
+            id="lot-size"
+            label="交易單位（股）"
+            error={errors.lotSize}
+            input={
+              <input
+                id="lot-size"
+                type="number"
+                min="1"
+                step="1"
+                value={lotSize}
+                onChange={(event) =>
+                  updateField('lotSize', () => setLotSize(event.target.value))
+                }
+                className="field-input mt-2"
+              />
+            }
+          />
+        </div>
+
         <div className="rounded-2xl border border-warning/30 bg-warning/10 p-4 text-xs leading-5 text-muted">
           <p className="font-bold text-warning">成本與風控假設</p>
           <p className="mt-1">
             費率欄位以百分比輸入，例如 0.1% 會送出
-            0.001。回撤門檻只產生提醒，不會停損；目前不自動加入台股交易稅或最低手續費。
+            0.001。商品種類決定賣出交易稅假設；券商折扣、最低費與取整須依帳戶實際約定填寫。回撤門檻只產生提醒，不會停損。
           </p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            id="used-for-tuning"
+            label="此期間是否曾用來調整參數"
+            input={
+              <select
+                id="used-for-tuning"
+                value={usedForTuning}
+                onChange={(event) =>
+                  updateField('usedForTuning', () =>
+                    setUsedForTuning(
+                      event.target.value as typeof usedForTuning,
+                    ),
+                  )
+                }
+                className="field-input mt-2"
+              >
+                <option value="UNKNOWN">待確認</option>
+                <option value="YES">是</option>
+                <option value="NO">否</option>
+              </select>
+            }
+          />
+          <Field
+            id="previously-viewed"
+            label="是否已看過此期間結果"
+            input={
+              <select
+                id="previously-viewed"
+                value={previouslyViewed}
+                onChange={(event) =>
+                  updateField('previouslyViewed', () =>
+                    setPreviouslyViewed(
+                      event.target.value as typeof previouslyViewed,
+                    ),
+                  )
+                }
+                className="field-input mt-2"
+              >
+                <option value="YES">是</option>
+                <option value="NO">否</option>
+                <option value="UNKNOWN">待確認</option>
+              </select>
+            }
+          />
         </div>
       </fieldset>
 

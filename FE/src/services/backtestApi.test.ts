@@ -274,6 +274,51 @@ describe('backtestApi', () => {
     ])
   })
 
+  it('解碼成本與兩種基準並拒絕交易日錯位', async () => {
+    const benchmark = {
+      metrics: resultResponse.metrics,
+      equityCurve: resultResponse.equityCurve,
+    }
+    const extended = {
+      ...resultResponse,
+      accountingStatus: 'INCOMPLETE',
+      config: {
+        ...resultResponse.config,
+        productType: 'ETF',
+        taxRate: 0.001,
+        minFee: 1,
+      },
+      metrics: { ...resultResponse.metrics, totalTax: 12 },
+      noCostMetrics: resultResponse.metrics,
+      benchmarks: { buyHold100: benchmark, buyHold50: benchmark },
+    }
+    fetchMock.mockResolvedValueOnce(jsonResponse(extended))
+    await expect(getBacktestResult(taskId)).resolves.toMatchObject({
+      accountingStatus: 'INCOMPLETE',
+      config: { taxRate: 0.001 },
+      metrics: { totalTax: 12 },
+      benchmarks: { buyHold100: { metrics: { finalEquity: 108000 } } },
+    })
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        ...extended,
+        benchmarks: {
+          ...extended.benchmarks,
+          buyHold50: {
+            ...benchmark,
+            equityCurve: [
+              { ...benchmark.equityCurve[0], date: '2020-01-03' },
+              benchmark.equityCurve[1],
+            ],
+          },
+        },
+      }),
+    )
+    await expect(getBacktestResult(taskId)).rejects.toMatchObject({
+      path: '$.benchmarks.buyHold50.equityCurve',
+    })
+  })
+
   it('將後端錯誤內容保留在 HttpError', async () => {
     const body = {
       statusCode: 400,

@@ -1,4 +1,5 @@
 import { downloadTradesCsv, tradeCsvFileName } from '../tradesCsv'
+import { backtestExportUrl } from '../../../services/backtestApi'
 import type {
   BacktestResultsProps,
   BacktestRunState,
@@ -257,6 +258,62 @@ export const BacktestResults = ({ state, isStale }: BacktestResultsProps) => {
           ))}
         </div>
 
+        {result.benchmarks ? (
+          <div className="mt-6 overflow-x-auto rounded-2xl border border-line">
+            <table className="w-full min-w-[560px] text-left text-sm tabular-nums">
+              <caption className="p-4 text-left font-bold">
+                同期間績效比較（期末按收盤價評價）
+              </caption>
+              <thead>
+                <tr className="border-t border-line text-muted">
+                  <th className="p-3">情境</th>
+                  <th className="p-3">期末資產</th>
+                  <th className="p-3">總報酬</th>
+                  <th className="p-3">年化報酬</th>
+                  <th className="p-3">最大回撤</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(
+                  [
+                    ['原策略', result.metrics],
+                    ['100% 買進持有', result.benchmarks.buyHold100.metrics],
+                    ['50% 買進持有', result.benchmarks.buyHold50.metrics],
+                    ['原策略零成本', result.noCostMetrics ?? result.metrics],
+                  ] as const
+                ).map(([name, item]) => (
+                  <tr key={name} className="border-t border-line">
+                    <th className="p-3 font-medium">{name}</th>
+                    <td className="p-3">{formatMoney(item.finalEquity)}</td>
+                    <td className="p-3">
+                      {formatPercent(item.totalReturnPct, true)}
+                    </td>
+                    <td className="p-3">
+                      {formatPercent(item.annualizedReturnPct, true)}
+                    </td>
+                    <td className="p-3">
+                      {formatPercent(-Math.abs(item.maxDrawdownPct))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {result.accountingStatus ? (
+          <div
+            role="status"
+            className="mt-5 rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning"
+          >
+            {result.accountingStatus === 'ASSUMED_COST'
+              ? '資料與會計狀態：已依提供的原始價格和公司行動記帳；費率仍是使用者假設，尚未核對券商約定。'
+              : result.data.adjustment === 'adjclose-ratio'
+                ? '資料與會計狀態：不完整。Yahoo 調整後價格缺少可核對的拆股及股息現金流；此處是價格序列模擬，不能視為實際帳戶績效。'
+                : '資料與會計狀態：待補公司行動。此資產曲線未核對股息與拆股，不能視為實際帳戶績效。'}
+          </div>
+        ) : null}
+
         <dl className="mt-5 grid gap-3 rounded-2xl border border-line p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <MetricDetail
             label="已實現損益"
@@ -267,8 +324,24 @@ export const BacktestResults = ({ state, isStale }: BacktestResultsProps) => {
             value={formatMoney(result.metrics.unrealizedPnl)}
           />
           <MetricDetail
+            label="期末股息應收"
+            value={formatMoney(result.metrics.finalDividendReceivable ?? 0)}
+          />
+          <MetricDetail
             label="累計手續費"
             value={formatMoney(result.metrics.totalFees)}
+          />
+          <MetricDetail
+            label="累計交易稅"
+            value={formatMoney(result.metrics.totalTax ?? 0)}
+          />
+          <MetricDetail
+            label="估計滑價影響"
+            value={formatMoney(result.metrics.totalSlippageCost ?? 0)}
+          />
+          <MetricDetail
+            label="股息現金入帳"
+            value={formatMoney(result.metrics.totalDividendsReceived ?? 0)}
           />
           <MetricDetail
             label="Profit Factor"
@@ -288,7 +361,38 @@ export const BacktestResults = ({ state, isStale }: BacktestResultsProps) => {
         ) : null}
 
         <div className="mt-6">
-          <EquityCurveChart points={result.equityCurve} />
+          <EquityCurveChart
+            points={result.equityCurve}
+            benchmark100={result.benchmarks?.buyHold100.equityCurve}
+            benchmark50={result.benchmarks?.buyHold50.equityCurve}
+          />
+          <div className="mt-4">
+            <EquityCurveChart
+              points={result.equityCurve}
+              benchmark100={result.benchmarks?.buyHold100.equityCurve}
+              benchmark50={result.benchmarks?.buyHold50.equityCurve}
+              valueKey="drawdownPct"
+            />
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-3 text-sm">
+          {(
+            [
+              'trades.csv',
+              'equity_daily.csv',
+              'benchmarks_daily.csv',
+              'summary.json',
+              'run_manifest.json',
+            ] as const
+          ).map((kind) => (
+            <a
+              key={kind}
+              href={backtestExportUrl(task.id, kind)}
+              className="rounded-lg border border-line px-3 py-2 text-accent underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              下載 {kind}
+            </a>
+          ))}
         </div>
         <TradesTable
           trades={result.trades}
@@ -321,6 +425,26 @@ export const BacktestResults = ({ state, isStale }: BacktestResultsProps) => {
             <Detail
               label="手續費 / 滑價"
               value={`${formatPercent(result.config.feeRate * 100)} / ${formatPercent(result.config.slippageRate * 100)}`}
+            />
+            <Detail
+              label="賣出手續費 / 交易稅"
+              value={`${formatPercent((result.config.sellFeeRate ?? result.config.feeRate) * 100)} / ${result.config.taxRate === undefined ? '待確認' : formatPercent(result.config.taxRate * 100)}`}
+            />
+            <Detail
+              label="折扣 / 最低費 / 取整"
+              value={`${formatPercent((result.config.feeDiscount ?? 1) * 100)} / ${formatMoney(result.config.minFee ?? 0)} / ${result.config.feeRounding ?? 'NONE'}`}
+            />
+            <Detail
+              label="商品 / 交易單位"
+              value={`${result.config.productType ?? '未確認'} / ${result.config.lotSize ?? 1} 股`}
+            />
+            <Detail
+              label="回撤高點 / 低點 / 恢復"
+              value={`${result.metrics.peakDate ?? '—'} / ${result.metrics.troughDate ?? '—'} / ${result.metrics.recoveryDate ?? '尚未恢復'}`}
+            />
+            <Detail
+              label="最長未回前高"
+              value={`${result.metrics.longestUnderwaterCalendarDays ?? 0} 日${result.metrics.longestUnderwaterUnrecovered ? '（仍未恢復）' : ''}`}
             />
             <Detail
               label="策略版本"
@@ -365,7 +489,7 @@ const TradesTable = ({ trades, fileName }: TradesTableProps) => {
             onClick={() => downloadTradesCsv(trades, fileName)}
             className="min-h-11 rounded-xl border border-accent/50 px-4 py-2 text-sm font-semibold text-accent transition hover:bg-accent/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
-            下載交易明細 CSV
+            下載表格摘要 CSV
           </button>
         </div>
       </div>
@@ -382,7 +506,7 @@ const TradesTable = ({ trades, fileName }: TradesTableProps) => {
                   '狀態',
                   '進場日',
                   '出場 / 評價日',
-                  '股數',
+                  '股數（進場 → 出場／期末）',
                   '進場價',
                   '出場 / 評價價',
                   '損益',
@@ -417,7 +541,9 @@ const TradesTable = ({ trades, fileName }: TradesTableProps) => {
                       {isOpen ? trade.markDate : trade.exitDate}
                     </td>
                     <td className="table-cell tabular-nums">
-                      {trade.shares.toLocaleString()}
+                      {trade.entryShares && trade.entryShares !== trade.shares
+                        ? `${trade.entryShares.toLocaleString()} → ${trade.shares.toLocaleString()}`
+                        : trade.shares.toLocaleString()}
                     </td>
                     <td className="table-cell tabular-nums">
                       {formatNumber(trade.entryPrice)}

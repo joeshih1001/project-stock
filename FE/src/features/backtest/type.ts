@@ -67,6 +67,9 @@ export interface PercentFieldProps {
 
 export interface EquityCurveChartProps {
   points: BacktestEquityPoint[]
+  benchmark100?: BacktestEquityPoint[]
+  benchmark50?: BacktestEquityPoint[]
+  valueKey?: 'equity' | 'drawdownPct'
 }
 
 export interface BacktestResultsProps {
