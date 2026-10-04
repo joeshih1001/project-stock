@@ -179,7 +179,9 @@ function getRequestUrl(input: RequestInfo | URL): string {
   return input.url
 }
 
-function installApiMock(options: { keepRunning?: boolean } = {}) {
+function installApiMock(
+  options: { keepRunning?: boolean; trades?: unknown[] } = {},
+) {
   const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
     const url = getRequestUrl(input)
     const method = init?.method ?? 'GET'
@@ -191,7 +193,15 @@ function installApiMock(options: { keepRunning?: boolean } = {}) {
       return jsonResponse(makeTask('queued'), 202)
     }
     if (url.endsWith(`/api/backtests/${taskId}/result`)) {
-      return jsonResponse(resultResponse)
+      return jsonResponse({
+        ...resultResponse,
+        metrics: {
+          ...resultResponse.metrics,
+          totalTrades: options.trades?.length ?? 0,
+          closedTrades: options.trades?.length ?? 0,
+        },
+        trades: options.trades ?? resultResponse.trades,
+      })
     }
     if (url.endsWith(`/api/backtests/${taskId}`) && method === 'DELETE') {
       return jsonResponse(makeTask('cancelled'))
@@ -211,6 +221,7 @@ function installApiMock(options: { keepRunning?: boolean } = {}) {
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -247,6 +258,9 @@ describe('App', () => {
       screen.getByRole('img', { name: /每日權益曲線/ }),
     ).toBeInTheDocument()
     expect(screen.getByText('這段期間沒有產生交易。')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '下載交易明細 CSV' }),
+    ).toBeDisabled()
 
     await waitFor(() => {
       const postCall = fetchMock.mock.calls.find(
@@ -262,6 +276,68 @@ describe('App', () => {
         ),
       ).toBe(true)
     })
+  })
+
+  it('有交易時可下載 CSV，檔名含回測識別資訊', async () => {
+    const trade = {
+      tradeId: 1,
+      status: 'CLOSED',
+      shares: 1000,
+      entrySignalDate: '2025-01-01',
+      entryDate: '2025-01-02',
+      entryPrice: 50,
+      entryGross: 50000,
+      entryFee: 0,
+      entryCashOutflow: 50000,
+      exitSignalDate: '2025-01-09',
+      exitDate: '2025-01-10',
+      exitPrice: 55,
+      exitGross: 55000,
+      exitFee: 0,
+      exitCashInflow: 55000,
+      grossPnl: 5000,
+      netPnl: 5000,
+      returnPct: 10,
+      holdingTradingDays: 7,
+      holdingCalendarDays: 8,
+      exitReason: 'STRATEGY_SIGNAL',
+      markDate: null,
+      markPrice: null,
+      unrealizedPnl: null,
+      unrealizedReturnPct: null,
+    }
+    installApiMock({ trades: [trade] })
+    const createObjectURL = vi.fn((blob: Blob) => {
+      if (!(blob instanceof Blob)) throw new Error('Expected a CSV Blob')
+      return 'blob:backtest-trades'
+    })
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal(
+      'URL',
+      class extends URL {
+        static createObjectURL = createObjectURL
+        static revokeObjectURL = revokeObjectURL
+      },
+    )
+    let downloadedFileName = ''
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      downloadedFileName = this.download
+    })
+    const user = userEvent.setup()
+    render(<App />)
+
+    await screen.findByRole('option', { name: 'MA 趨勢策略' })
+    await user.click(screen.getByRole('button', { name: /建立回測任務/ }))
+    await screen.findByRole('heading', { name: '0050 回測結果' })
+    await user.click(screen.getByRole('button', { name: '下載交易明細 CSV' }))
+
+    expect(createObjectURL).toHaveBeenCalledOnce()
+    expect(createObjectURL.mock.calls[0][0].type).toBe('text/csv;charset=utf-8')
+    expect(downloadedFileName).toBe(
+      `backtest-0050-2018-01-01-2025-12-31-${taskId}-trades.csv`,
+    )
   })
 
   it('可取消執行中的任務', async () => {

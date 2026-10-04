@@ -240,9 +240,6 @@ export function BacktestPage() {
             <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
               台股策略回測
             </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted sm:text-base">
-              Node.js 管理行情與任務，Python 以日 K 執行可重現的 MA 趨勢回測。
-            </p>
           </div>
           <div
             className="flex items-center gap-2 self-start rounded-full border border-line bg-panel px-3 py-2 text-xs font-medium text-muted sm:self-auto"
@@ -255,25 +252,6 @@ export function BacktestPage() {
             {isApiReady ? 'API 已連線' : '正在連接 API'}
           </div>
         </header>
-
-        <section
-          aria-label="API 端點"
-          className="mb-6 flex flex-wrap gap-2 text-xs text-muted"
-        >
-          {[
-            'GET /api/market-data',
-            'POST /api/backtests',
-            'GET /api/backtests/:id',
-            'DELETE /api/backtests/:id',
-          ].map((endpoint) => (
-            <span
-              key={endpoint}
-              className="max-w-full rounded-full border border-line bg-panel/70 px-3 py-1.5 font-mono break-all"
-            >
-              {endpoint}
-            </span>
-          ))}
-        </section>
 
         <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(380px,0.78fr)_minmax(0,1.22fr)]">
           <section

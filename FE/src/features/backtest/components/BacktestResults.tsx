@@ -4,6 +4,7 @@ import type {
   BacktestTrade,
   RunBacktestRequest,
 } from '../../../services/backtestApi'
+import { downloadTradesCsv, tradeCsvFileName } from '../tradesCsv'
 import { EquityCurveChart } from './EquityCurveChart'
 
 export type BacktestRunState =
@@ -310,7 +311,15 @@ export function BacktestResults({ state, isStale }: BacktestResultsProps) {
         <div className="mt-6">
           <EquityCurveChart points={result.equityCurve} />
         </div>
-        <TradesTable trades={result.trades} />
+        <TradesTable
+          trades={result.trades}
+          fileName={tradeCsvFileName(
+            result.symbol,
+            result.config.from,
+            result.config.to,
+            task.id,
+          )}
+        />
 
         <details className="mt-6 rounded-2xl border border-line bg-canvas/25 p-4 text-xs">
           <summary className="cursor-pointer font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
@@ -359,7 +368,13 @@ export function BacktestResults({ state, isStale }: BacktestResultsProps) {
   )
 }
 
-function TradesTable({ trades }: { trades: BacktestTrade[] }) {
+function TradesTable({
+  trades,
+  fileName,
+}: {
+  trades: BacktestTrade[]
+  fileName: string
+}) {
   return (
     <div className="mt-6">
       <div className="mb-3 flex items-end justify-between gap-3">
@@ -369,7 +384,17 @@ function TradesTable({ trades }: { trades: BacktestTrade[] }) {
           </p>
           <h3 className="mt-1 font-bold">交易明細</h3>
         </div>
-        <span className="text-xs text-muted">{trades.length} 筆</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs text-muted">{trades.length} 筆</span>
+          <button
+            type="button"
+            disabled={trades.length === 0}
+            onClick={() => downloadTradesCsv(trades, fileName)}
+            className="min-h-11 rounded-xl border border-accent/50 px-4 py-2 text-sm font-semibold text-accent transition hover:bg-accent/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            下載交易明細 CSV
+          </button>
+        </div>
       </div>
       {trades.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-line p-5 text-sm text-muted">
