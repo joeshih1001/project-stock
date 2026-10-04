@@ -49,7 +49,7 @@ class BacktestEngineTests(unittest.TestCase):
     def write_csv(self, rows: str, name: str = "0050.csv", *, bom: bool = False) -> Path:
         path = self.fixture_path(name)
         encoding = "utf-8-sig" if bom else "utf-8"
-        path.write_text(HEADER + rows, encoding=encoding, newline="")
+        path.write_text(HEADER + rows, encoding=encoding)
         return path
 
     def test_signal_executes_at_next_open_with_whole_share_allocation(self) -> None:
@@ -121,6 +121,7 @@ class BacktestEngineTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["finalMarketValue"], 450.0)
         self.assertEqual(result["metrics"]["finalEquity"], 950.05)
         self.assertEqual(result["metrics"]["totalFees"], 4.95)
+        self.assertEqual(result["metrics"]["totalSlippageCost"], 45)
 
     def test_end_position_is_marked_not_force_liquidated(self) -> None:
         path = self.write_csv(
@@ -259,7 +260,7 @@ class BacktestEngineTests(unittest.TestCase):
         for name, contents in cases.items():
             with self.subTest(name=name):
                 path = self.fixture_path(f"{name}.csv")
-                path.write_text(contents, encoding="utf-8", newline="")
+                path.write_text(contents, encoding="utf-8")
                 with self.assertRaises(BacktestError):
                     load_csv(path)
 
@@ -352,7 +353,109 @@ class BacktestEngineTests(unittest.TestCase):
         self.assertEqual(completed.stdout, "")
         self.assertIn("backtest input error", completed.stderr)
 
+    def test_cost_ledger_and_benchmarks_share_the_same_bars(self) -> None:
+        path = self.write_csv(
+            '2024-01-01,10,11,9,10,100\n'
+            '2024-01-02,11,13,10,12,100\n'
+            '2024-01-03,20,21,17,18,100\n'
+            '2024-01-04,9,10,7,8,100\n'
+            '2024-01-05,7,8,6,7,100\n'
+        )
+        result = run_backtest(
+            data=path, symbol='0050', cash=Decimal('100'), ma=2,
+            allocation=Decimal('.5'), fee_rate=Decimal('.01'),
+            sell_fee_rate=Decimal('.02'), fee_discount=Decimal('.5'),
+            min_fee=Decimal('1'), fee_rounding='FLOOR',
+            tax_rate=Decimal('.1'), lot_size=1, adjustment='raw',
+        )
+        trade = result['trades'][0]
+        self.assertEqual(trade['entryFee'], 1)
+        self.assertEqual(trade['exitFee'], 1)
+        self.assertEqual(trade['exitTax'], 1)
+        self.assertEqual(trade['netPnl'], -29)
+        self.assertEqual(result['metrics']['finalEquity'], 71)
+        self.assertEqual(result['metrics']['totalTax'], 1)
+        self.assertEqual(result['metrics']['troughDate'], '2024-01-05')
+        self.assertEqual(result['equityCurve'][3]['equity'], 75)
+        self.assertEqual(result['equityCurve'][4]['dailyTax'], 1)
+        self.assertEqual(result['noCostMetrics']['finalEquity'], 74)
+        self.assertEqual(result['benchmarks']['buyHold100']['metrics']['finalEquity'], 72)
+        self.assertEqual(result['benchmarks']['buyHold50']['metrics']['finalEquity'], 87)
+        self.assertEqual(result['benchmarks']['buyHold50']['equityCurve'][1]['positionShares'], 4)
+
+    def test_buy_and_sell_slippage_change_cash_once(self) -> None:
+        path = self.write_csv(
+            '2024-01-01,10,11,9,10,100\n'
+            '2024-01-02,11,13,10,12,100\n'
+            '2024-01-03,20,21,17,18,100\n'
+            '2024-01-04,9,10,7,8,100\n'
+            '2024-01-05,7,8,6,7,100\n'
+        )
+        result = run_backtest(data=path, cash=Decimal('100'), ma=2, slippage_rate=Decimal('.1'))
+        trade = result['trades'][0]
+        self.assertEqual(trade['entryReferencePrice'], 20)
+        self.assertEqual(trade['entryPrice'], 22)
+        self.assertEqual(trade['exitReferencePrice'], 7)
+        self.assertEqual(trade['exitPrice'], 6.3)
+        self.assertEqual(result['metrics']['totalSlippageCost'], 5.4)
+        self.assertEqual(result['metrics']['finalEquity'], 68.6)
+        self.assertEqual(result['noCostMetrics']['finalEquity'], 74)
+
+    def test_lot_size_and_min_fee_prevent_negative_cash(self) -> None:
+        path = self.write_csv('2024-01-01,10,10,10,10,100\n2024-01-02,11,11,11,11,100\n2024-01-03,20,20,20,20,100\n')
+        result = run_backtest(
+            data=path, cash=Decimal('100'), ma=2, allocation=Decimal('.5'),
+            fee_rate=Decimal('.01'), min_fee=Decimal('11'), lot_size=2,
+        )
+        self.assertEqual(result['metrics']['totalTrades'], 0)
+        self.assertEqual(result['metrics']['finalCash'], 100)
+        self.assertTrue(all(point['cash'] >= 0 for point in result['equityCurve']))
+
+    def test_raw_split_and_dividend_preserve_equity_through_ex_and_pay_dates(self) -> None:
+        path = self.write_csv(
+            '2024-01-01,10,10,10,10,100\n'
+            '2024-01-02,2.5,2.5,2.5,2.5,100\n'
+            '2024-01-03,2,2,2,2,100\n'
+            '2024-01-04,2,2,2,2,100\n'
+        )
+        actions = self.fixture_path('actions.csv')
+        actions.write_text('Date,Type,Ratio,AmountPerShare,PayDate\n2024-01-02,SPLIT,4,,\n2024-01-03,DIVIDEND,,0.5,2024-01-04\n')
+        result = run_backtest(
+            data=path, symbol='TEST', cash=Decimal('100'), ma=2,
+            adjustment='raw', actions_path=actions, actions_verified=True,
+        )
+        benchmark = result['benchmarks']['buyHold100']
+        self.assertEqual(result['accountingStatus'], 'ASSUMED_COST')
+        self.assertEqual([point['equity'] for point in benchmark['equityCurve']], [100, 100, 100, 100])
+        self.assertEqual(benchmark['equityCurve'][1]['positionShares'], 40)
+        self.assertEqual(benchmark['equityCurve'][2]['dividendReceivable'], 20)
+        self.assertEqual(benchmark['equityCurve'][3]['dividendsReceived'], 20)
+        self.assertEqual(benchmark['metrics']['totalDividendsReceived'], 20)
+        self.assertEqual(benchmark['trades'][0]['entryShares'], 10)
+        self.assertEqual(benchmark['trades'][0]['shares'], 40)
+        self.assertEqual(result['benchmarks']['buyHold50']['metrics']['finalEquity'], 100)
+
+    def test_closed_trade_keeps_unpaid_dividend_separate_from_realized_pnl(self) -> None:
+        path = self.write_csv(
+            '2024-01-01,10,10,10,10,100\n'
+            '2024-01-02,12,12,12,12,100\n'
+            '2024-01-03,10,12,10,12,100\n'
+            '2024-01-04,8,8,8,8,100\n'
+            '2024-01-05,8,8,8,8,100\n'
+        )
+        actions = self.fixture_path('unpaid-actions.csv')
+        actions.write_text('Date,Type,Ratio,AmountPerShare,PayDate\n2024-01-04,DIVIDEND,,1,2024-01-08\n')
+        result = run_backtest(
+            data=path, symbol='TEST', cash=Decimal('100'), ma=2,
+            adjustment='raw', actions_path=actions, actions_verified=True,
+        )
+        self.assertEqual(result['trades'][0]['status'], 'CLOSED')
+        self.assertEqual(result['trades'][0]['dividendReceivable'], 5)
+        self.assertEqual(result['trades'][0]['netPnl'], -10)
+        self.assertEqual(result['metrics']['realizedPnl'], -10)
+        self.assertEqual(result['metrics']['unsettledClosedDividends'], 5)
+        self.assertEqual(result['metrics']['finalEquity'], 95)
+
 
 if __name__ == "__main__":
     unittest.main()
-

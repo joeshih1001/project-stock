@@ -1,6 +1,6 @@
 # Python MA 趨勢回測器
 
-此目錄是供 Node.js 子程序呼叫的純 Python 回測入口，不需安裝第三方套件。支援 Python 3.10 以上版本。
+此目錄是供 Node.js 子程序呼叫的純 Python 回測入口，不需安裝第三方套件。支援 Python 3.9 以上版本。新增的成本、基準與公司行動用法詳見 [回測會計說明](../BACKTEST_ACCOUNTING.md)。
 
 ## 執行
 
@@ -24,7 +24,7 @@ python python/backtest.py `
 
 `--data` 是唯一必要參數；其餘參數有預設值，`--symbol` 未給時才使用 CSV 檔名。CSV 必須為 UTF-8（可含 BOM），包含且嚴格驗證 `Date,Open,High,Low,Close,Volume`。日期必須唯一並遞增。
 
-成功時 stdout 只會出現一份 JSON；錯誤只寫 stderr 並以非零狀態結束。`--fee-rate` 與 `--slippage-rate` 都是比率，例如 `0.001` 代表 0.1%。目前不會自行加入台股交易稅或最低手續費。
+成功時 stdout 只會出現一份 JSON；錯誤只寫 stderr 並以非零狀態結束。`--fee-rate` 與 `--slippage-rate` 都是比率，例如 `0.001` 代表 0.1%。交易稅、最低費、折扣與公司行動須明確設定；未核對資料時結果會標記不完整。
 
 ## 策略與成交規則
 
@@ -61,4 +61,3 @@ warnings
 ```powershell
 python -m unittest discover -s python/tests -v
 ```
-

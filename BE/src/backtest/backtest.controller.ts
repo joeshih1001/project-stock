@@ -8,12 +8,15 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { UpdateMarketDataDto } from '../market-data/dto/update-market-data.dto';
 import { MarketDataService } from '../market-data/market-data.service';
 import { BacktestJobService } from './backtest-job.service';
 import { RunBacktestDto } from './dto/run-backtest.dto';
+import { renderBacktestExport } from './backtest-export';
 
 @ApiTags('backtests')
 @Controller()
@@ -81,6 +84,19 @@ export class BacktestController {
   @ApiOperation({ summary: '讀取已完成的完整回測報告' })
   result(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     return this.jobs.result(id);
+  }
+
+  @Get('backtests/:id/export/:kind')
+  @ApiOperation({ summary: '下載交易、每日資產、基準、摘要或執行參數' })
+  async exportResult(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('kind') kind: string,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<string> {
+    const body = renderBacktestExport(await this.jobs.result(id), kind);
+    response.setHeader('Content-Type', kind.endsWith('.csv') ? 'text/csv; charset=utf-8' : 'application/json; charset=utf-8');
+    response.setHeader('Content-Disposition', `attachment; filename="${kind}"`);
+    return body;
   }
 
   @Delete('backtests/:id')

@@ -210,4 +210,16 @@ describe('HTTP API (e2e)', () => {
     expect(jobs.result).toHaveBeenCalledWith(TASK_ID);
     expect(jobs.cancel).toHaveBeenCalledWith(TASK_ID);
   });
+
+  it('downloads CSV and JSON reports from a completed task', async () => {
+    const [csvResponse, jsonResponse] = await Promise.all([
+      fetch(`${baseUrl}/api/backtests/${TASK_ID}/export/trades.csv`),
+      fetch(`${baseUrl}/api/backtests/${TASK_ID}/export/summary.json`),
+    ]);
+    expect(csvResponse.status).toBe(200);
+    expect(csvResponse.headers.get('content-disposition')).toContain('trades.csv');
+    expect(await csvResponse.text()).toContain('tradeId,status');
+    expect(jsonResponse.status).toBe(200);
+    expect(await jsonResponse.json()).toMatchObject({ symbol: 'AAPL', strategy: { finalEquity: 100_000 } });
+  });
 });

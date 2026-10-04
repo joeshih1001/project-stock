@@ -60,6 +60,12 @@ describe('PythonBacktestRunner integration', () => {
   });
 
   it('spawns Python, validates its JSON contract, and returns a versioned report', async () => {
+    request.productType = 'ETF';
+    request.sellFeeRate = 0.002;
+    request.feeDiscount = 0.5;
+    request.minFee = 1;
+    request.feeRounding = 'FLOOR';
+    request.lotSize = 2;
     const result = await runner.run(request, marketData, new AbortController().signal);
 
     expect(result).toMatchObject({
@@ -71,6 +77,9 @@ describe('PythonBacktestRunner integration', () => {
         to: '2024-01-04',
         initialCash: 100_000,
         allocation: 0.5,
+        productType: 'ETF',
+        taxRate: 0.001,
+        sellFeeRate: 0.002,
       },
       data: {
         source: 'yahoo-finance2',
@@ -82,6 +91,8 @@ describe('PythonBacktestRunner integration', () => {
     });
     expect(result.equityCurve).toHaveLength(4);
     expect(result.trades.length).toBeGreaterThan(0);
+    expect((result.benchmarks as Record<string, { equityCurve: unknown[] }>).buyHold100.equityCurve).toHaveLength(4);
+    expect(result.accountingStatus).toBe('INCOMPLETE');
 
     const validate = (
       runner as unknown as {
@@ -101,6 +112,10 @@ describe('PythonBacktestRunner integration', () => {
     const invalidTrade = structuredClone(result);
     (invalidTrade.trades[0] as Record<string, unknown>).entryPrice = Number.NaN;
     expect(() => validate(invalidTrade, request, marketData)).toThrow(/進場交易明細/);
+
+    const invalidBenchmark = structuredClone(result);
+    ((invalidBenchmark.benchmarks as Record<string, { equityCurve: Record<string, unknown>[] }>).buyHold50.equityCurve[1]).date = '2024-01-05';
+    expect(() => validate(invalidBenchmark, request, marketData)).toThrow(/資產曲線|交易日不一致/);
   });
 
   it('rejects a report when the prepared data version does not match the CSV bytes', async () => {

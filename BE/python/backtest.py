@@ -18,7 +18,7 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal, InvalidOperation, ROUND_FLOOR
+from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP, ROUND_DOWN
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -40,7 +40,7 @@ except ImportError:  # pragma: no cover - exercised by CLI subprocess tests
 
 SCHEMA_VERSION = 1
 ENGINE_NAME = "stdlib-ma-backtester"
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "1.1.0"
 END_OF_PERIOD_POLICY = "MARK_TO_MARKET"
 REQUIRED_COLUMNS = ("Date", "Open", "High", "Low", "Close", "Volume")
 ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
@@ -73,22 +73,88 @@ class BacktestConfig:
     max_drawdown_warning_pct: Decimal
     requested_from: date | None
     requested_to: date | None
+    sell_fee_rate: Decimal = Decimal('0')
+    fee_discount: Decimal = Decimal('1')
+    min_fee: Decimal = Decimal('0')
+    fee_rounding: str = 'NONE'
+    product_type: str = 'UNSPECIFIED'
+    lot_size: int = 1
+    tax_rate: Decimal = Decimal('0')
 
 
 @dataclass
 class Position:
     trade_id: int
     shares: int
+    entry_shares: int
     entry_signal_date: date
     entry_date: date
     entry_index: int
     entry_price: Decimal
     entry_gross: Decimal
     entry_fee: Decimal
+    entry_reference_price: Decimal = Decimal('0')
+    entry_slippage_cost: Decimal = Decimal('0')
+    dividends_received: Decimal = Decimal('0')
+    dividend_receivable: Decimal = Decimal('0')
 
     @property
     def cash_outflow(self) -> Decimal:
         return self.entry_gross + self.entry_fee
+
+
+@dataclass(frozen=True)
+class CorporateAction:
+    trading_date: date
+    kind: str
+    ratio: int = 1
+    amount_per_share: Decimal = Decimal(0)
+    pay_date: date | None = None
+
+
+def load_actions(path_value: str | Path) -> tuple[list[CorporateAction], str]:
+    try:
+        path = Path(path_value).expanduser().resolve(strict=True)
+        raw = path.read_bytes()
+    except OSError as error:
+        raise BacktestError(f'cannot read corporate actions CSV: {error}') from error
+    actions: list[CorporateAction] = []
+    try:
+        contents = raw.decode('utf-8-sig')
+    except UnicodeDecodeError as error:
+        raise BacktestError('actions CSV must be UTF-8 encoded') from error
+    seen: set[tuple[date, str]] = set()
+    with io.StringIO(contents, newline='') as stream:
+        reader = csv.DictReader(stream, strict=True)
+        if reader.fieldnames != ['Date', 'Type', 'Ratio', 'AmountPerShare', 'PayDate']:
+            raise BacktestError('actions CSV header must be Date,Type,Ratio,AmountPerShare,PayDate')
+        for row in reader:
+            if None in row or any(value is None for value in row.values()):
+                raise BacktestError('corporate action row has missing or extra columns')
+            action_date = _parse_iso_date(row['Date'], 'actions Date')
+            kind = row['Type']
+            if (action_date, kind) in seen:
+                raise BacktestError(f'duplicate {kind} action on {action_date}')
+            seen.add((action_date, kind))
+            if kind == 'SPLIT':
+                try:
+                    ratio = int(row['Ratio'])
+                except ValueError as error:
+                    raise BacktestError('split Ratio must be an integer') from error
+                if ratio < 2 or row['AmountPerShare'] or row['PayDate']:
+                    raise BacktestError('invalid SPLIT action')
+                actions.append(CorporateAction(action_date, kind, ratio=ratio))
+            elif kind == 'DIVIDEND':
+                amount = _parse_decimal(row['AmountPerShare'], 'dividend AmountPerShare')
+                pay_date = _parse_iso_date(row['PayDate'], 'dividend PayDate')
+                if amount <= 0 or pay_date < action_date or row['Ratio']:
+                    raise BacktestError('invalid DIVIDEND action')
+                actions.append(CorporateAction(action_date, kind, amount_per_share=amount, pay_date=pay_date))
+            else:
+                raise BacktestError(f'unknown corporate action type {kind!r}')
+    if any(actions[index].trading_date > actions[index + 1].trading_date for index in range(len(actions) - 1)):
+        raise BacktestError('corporate actions must be sorted by Date')
+    return actions, hashlib.sha256(raw).hexdigest()
 
 
 def _parse_iso_date(raw: str, field_name: str) -> date:
@@ -153,6 +219,10 @@ def _validate_config(config: BacktestConfig) -> None:
         ("cash", config.initial_cash),
         ("allocation", config.allocation),
         ("fee-rate", config.fee_rate),
+        ("sell-fee-rate", config.sell_fee_rate),
+        ("fee-discount", config.fee_discount),
+        ("min-fee", config.min_fee),
+        ("tax-rate", config.tax_rate),
         ("slippage-rate", config.slippage_rate),
         ("max-drawdown-warning-pct", config.max_drawdown_warning_pct),
     ):
@@ -174,6 +244,16 @@ def _validate_config(config: BacktestConfig) -> None:
         raise BacktestError("slippage-rate must be at least 0 and less than 1")
     if config.max_drawdown_warning_pct < 0 or config.max_drawdown_warning_pct > 100:
         raise BacktestError("max-drawdown-warning-pct must be at least 0 and at most 100")
+    if not 0 <= config.sell_fee_rate < 1 or not 0 <= config.tax_rate < 1:
+        raise BacktestError('sell fee rate and tax rate must be between 0 and 1')
+    if not 0 <= config.fee_discount <= 1 or config.min_fee < 0:
+        raise BacktestError('fee discount and minimum fee must be nonnegative')
+    if config.fee_rounding not in ('NONE', 'FLOOR', 'HALF_UP'):
+        raise BacktestError('fee rounding must be NONE, FLOOR or HALF_UP')
+    if config.product_type not in ('ETF', 'STOCK', 'UNSPECIFIED'):
+        raise BacktestError('product type must be ETF, STOCK or UNSPECIFIED')
+    if isinstance(config.lot_size, bool) or not isinstance(config.lot_size, int) or config.lot_size < 1:
+        raise BacktestError('lot size must be positive')
     if (
         config.requested_from is not None
         and config.requested_to is not None
@@ -303,6 +383,73 @@ def _warning(code: str, message: str) -> str:
     return f"[{code}] {message}"
 
 
+def _fee(gross: Decimal, rate: Decimal, config: BacktestConfig) -> Decimal:
+    amount = gross * rate * config.fee_discount if rate else Decimal(0)
+    if config.fee_rounding == 'FLOOR':
+        amount = amount.quantize(Decimal('1'), rounding=ROUND_DOWN)
+    elif config.fee_rounding == 'HALF_UP':
+        amount = amount.quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+    return max(amount, config.min_fee)
+
+
+def _affordable_shares(budget: Decimal, price: Decimal, config: BacktestConfig) -> int:
+    shares = int((budget / price).to_integral_value(rounding=ROUND_FLOOR))
+    shares -= shares % config.lot_size
+    while shares >= config.lot_size:
+        gross = price * shares
+        if gross + _fee(gross, config.fee_rate, config) <= budget:
+            return shares
+        shares -= config.lot_size
+    return 0
+
+
+def _drawdown_details(curve: Sequence[dict[str, Any]], initial_cash: Decimal, threshold: Decimal) -> dict[str, Any]:
+    peak = initial_cash
+    current_peak_date: str | None = curve[0]['date'] if curve else None
+    max_peak_date: str | None = None
+    trough_date: str | None = None
+    recovery_date: str | None = None
+    max_pct = Decimal(0)
+    longest = 0
+    underwater_start: date | None = None
+    longest_unrecovered = False
+    for point in curve:
+        current_date = date.fromisoformat(point['date'])
+        equity = Decimal(str(point['equity']))
+        if equity >= peak:
+            if underwater_start is not None:
+                days = (current_date - underwater_start).days
+                if days > longest:
+                    longest = days
+                    longest_unrecovered = False
+                underwater_start = None
+            if recovery_date is None and trough_date is not None:
+                recovery_date = point['date']
+            if equity > peak:
+                peak = equity
+                current_peak_date = point['date']
+        else:
+            if underwater_start is None:
+                underwater_start = current_date
+            pct = (peak - equity) / peak * 100
+            if pct > max_pct:
+                max_pct = pct
+                trough_date = point['date']
+                max_peak_date = current_peak_date
+                recovery_date = None
+    if underwater_start is not None:
+        days = (date.fromisoformat(curve[-1]['date']) - underwater_start).days
+        if days > longest:
+            longest = days
+            longest_unrecovered = True
+    return {
+        'peakDate': max_peak_date, 'troughDate': trough_date,
+        'recoveryDate': recovery_date, 'longestUnderwaterCalendarDays': longest,
+        'longestUnderwaterUnrecovered': longest_unrecovered,
+        'thresholdExceeded': max_pct > 0 and max_pct >= threshold,
+    }
+
+
 def _closed_trade(
     position: Position,
     *,
@@ -311,27 +458,37 @@ def _closed_trade(
     exit_index: int,
     exit_price: Decimal,
     exit_fee: Decimal,
+    exit_tax: Decimal = Decimal(0),
+    exit_reference_price: Decimal = Decimal(0),
 ) -> dict[str, Any]:
     exit_gross = exit_price * position.shares
-    cash_inflow = exit_gross - exit_fee
+    cash_inflow = exit_gross - exit_fee - exit_tax
     gross_pnl = exit_gross - position.entry_gross
-    net_pnl = cash_inflow - position.cash_outflow
+    net_pnl = cash_inflow + position.dividends_received - position.cash_outflow
     return_pct = _percentage(net_pnl, position.cash_outflow)
     return {
         "tradeId": position.trade_id,
         "status": "CLOSED",
         "shares": position.shares,
+        "entryShares": position.entry_shares,
         "entrySignalDate": position.entry_signal_date.isoformat(),
         "entryDate": position.entry_date.isoformat(),
         "entryPrice": _number(position.entry_price),
+        "entryReferencePrice": _number(position.entry_reference_price),
+        "entrySlippageCost": _number(position.entry_slippage_cost),
         "entryGross": _number(position.entry_gross),
         "entryFee": _number(position.entry_fee),
         "entryCashOutflow": _number(position.cash_outflow),
+        "dividendCash": _number(position.dividends_received),
+        "dividendReceivable": _number(position.dividend_receivable),
         "exitSignalDate": exit_signal_date.isoformat(),
         "exitDate": exit_date.isoformat(),
         "exitPrice": _number(exit_price),
+        "exitReferencePrice": _number(exit_reference_price),
+        "exitSlippageCost": _number((exit_reference_price - exit_price) * position.shares),
         "exitGross": _number(exit_gross),
         "exitFee": _number(exit_fee),
+        "exitTax": _number(exit_tax),
         "exitCashInflow": _number(cash_inflow),
         "grossPnl": _number(gross_pnl),
         "netPnl": _number(net_pnl),
@@ -348,23 +505,31 @@ def _closed_trade(
 
 def _open_trade(position: Position, last_bar: Bar) -> dict[str, Any]:
     market_value = last_bar.close * position.shares
-    unrealized_pnl = market_value - position.cash_outflow
+    unrealized_pnl = market_value + position.dividends_received + position.dividend_receivable - position.cash_outflow
     unrealized_return = _percentage(unrealized_pnl, position.cash_outflow)
     return {
         "tradeId": position.trade_id,
         "status": "OPEN",
         "shares": position.shares,
+        "entryShares": position.entry_shares,
         "entrySignalDate": position.entry_signal_date.isoformat(),
         "entryDate": position.entry_date.isoformat(),
         "entryPrice": _number(position.entry_price),
+        "entryReferencePrice": _number(position.entry_reference_price),
+        "entrySlippageCost": _number(position.entry_slippage_cost),
         "entryGross": _number(position.entry_gross),
         "entryFee": _number(position.entry_fee),
         "entryCashOutflow": _number(position.cash_outflow),
+        "dividendCash": _number(position.dividends_received),
+        "dividendReceivable": _number(position.dividend_receivable),
         "exitSignalDate": None,
         "exitDate": None,
         "exitPrice": None,
+        "exitReferencePrice": None,
+        "exitSlippageCost": None,
         "exitGross": None,
         "exitFee": None,
+        "exitTax": None,
         "exitCashInflow": None,
         "grossPnl": None,
         "netPnl": None,
@@ -405,19 +570,21 @@ def _metrics(
     closed_trade_net_pnls: Sequence[Decimal],
     position: Position | None,
     cash: Decimal,
+    dividend_receivable: Decimal,
     total_fees: Decimal,
+    total_tax: Decimal,
+    total_slippage: Decimal,
     max_drawdown_pct: Decimal,
     bars_in_market: int,
 ) -> dict[str, Any]:
     final_market_value = bars[-1].close * position.shares if position is not None else Decimal(0)
-    final_equity = cash + final_market_value
+    final_equity = cash + final_market_value + dividend_receivable
     total_pnl = final_equity - config.initial_cash
     unrealized_pnl = (
-        final_market_value - position.cash_outflow if position is not None else Decimal(0)
+        final_market_value + position.dividends_received + position.dividend_receivable - position.cash_outflow if position is not None else Decimal(0)
     )
-    # With a single long-only position, this identity avoids deriving metrics
-    # from the rounded JSON representation of individual closed trades.
-    realized_pnl = total_pnl - unrealized_pnl
+    realized_pnl = sum(closed_trade_net_pnls, Decimal(0))
+    unsettled_closed_dividends = total_pnl - realized_pnl - unrealized_pnl
     wins = [net_pnl for net_pnl in closed_trade_net_pnls if net_pnl > 0]
     losses = [net_pnl for net_pnl in closed_trade_net_pnls if net_pnl < 0]
     gross_profit = sum(wins, Decimal(0))
@@ -430,16 +597,20 @@ def _metrics(
         "initialCash": _number(config.initial_cash),
         "finalCash": _number(cash),
         "finalMarketValue": _number(final_market_value),
+        "finalDividendReceivable": _number(dividend_receivable),
         "finalEquity": _number(final_equity),
         "totalPnl": _number(total_pnl),
         "realizedPnl": _number(realized_pnl),
         "unrealizedPnl": _number(unrealized_pnl),
+        "unsettledClosedDividends": _number(unsettled_closed_dividends),
         "totalReturnPct": _number(total_return) if total_return is not None else None,
         "annualizedReturnPct": _annualized_return_pct(
             config.initial_cash, final_equity, bars[0].trading_date, bars[-1].trading_date
         ),
         "maxDrawdownPct": _number(max_drawdown_pct),
         "totalFees": _number(total_fees),
+        "totalTax": _number(total_tax),
+        "totalSlippageCost": _number(total_slippage),
         "totalTrades": len(closed_trades) + (1 if position is not None else 0),
         "closedTrades": len(closed_trades),
         "openTrades": 1 if position is not None else 0,
@@ -453,7 +624,9 @@ def _metrics(
 
 
 def _run_engine(
-    bars: Sequence[Bar], config: BacktestConfig, trading_start_index: int
+    bars: Sequence[Bar], config: BacktestConfig, trading_start_index: int,
+    mode: str = 'strategy', zero_cost: bool = False,
+    actions: Sequence[CorporateAction] = (),
 ) -> tuple[dict[str, Any], list[str]]:
     if trading_start_index < 0 or trading_start_index >= len(bars):
         raise BacktestError("trading start index is outside the available data")
@@ -471,6 +644,15 @@ def _run_engine(
     equity_values: list[Decimal] = []
     warnings: list[str] = []
     total_fees = Decimal(0)
+    total_tax = Decimal(0)
+    total_slippage = Decimal(0)
+    total_dividends = Decimal(0)
+    dividend_receivable = Decimal(0)
+    receivables: list[tuple[date, Decimal, int]] = []
+    closed_trade_indexes: dict[int, int] = {}
+    actions_by_date: dict[date, list[CorporateAction]] = {}
+    for action in actions:
+        actions_by_date.setdefault(action.trading_date, []).append(action)
     peak_equity = config.initial_cash
     max_drawdown_pct = Decimal(0)
     bars_in_market = 0
@@ -480,42 +662,87 @@ def _run_engine(
         bar = bars[index]
         moving_average = moving_averages[index]
         trading_index = index - trading_start_index
+        daily_fees = Decimal(0)
+        daily_tax = Decimal(0)
+        daily_dividends = Decimal(0)
+        for action in actions_by_date.get(bar.trading_date, []):
+            if position is None:
+                continue
+            if action.kind == 'SPLIT':
+                position.shares *= action.ratio
+            else:
+                amount = action.amount_per_share * position.shares
+                position.dividend_receivable += amount
+                dividend_receivable += amount
+                receivables.append((action.pay_date or action.trading_date, amount, position.trade_id))
+        for pay_date, amount, trade_id in list(receivables):
+            if pay_date > bar.trading_date:
+                continue
+            cash += amount
+            dividend_receivable -= amount
+            daily_dividends += amount
+            total_dividends += amount
+            receivables.remove((pay_date, amount, trade_id))
+            if position is not None and position.trade_id == trade_id:
+                position.dividends_received += amount
+                position.dividend_receivable -= amount
+            else:
+                closed_index = closed_trade_indexes[trade_id]
+                trade = closed_trades[closed_index]
+                trade['dividendCash'] = _number(Decimal(str(trade['dividendCash'])) + amount)
+                trade['dividendReceivable'] = _number(Decimal(str(trade['dividendReceivable'])) - amount)
+                updated_pnl = Decimal(str(trade['netPnl'])) + amount
+                trade['netPnl'] = _number(updated_pnl)
+                pnl_pct = _percentage(updated_pnl, Decimal(str(trade['entryCashOutflow'])))
+                trade['returnPct'] = _number(pnl_pct) if pnl_pct is not None else None
+                closed_trade_net_pnls[closed_index] += amount
+        if mode != 'strategy' and trading_index == 0:
+            pending = ('BUY', bar.trading_date)
         if pending is not None:
             action, signal_date = pending
             if action == "BUY" and position is None:
-                fill_price = bar.open * (Decimal(1) + config.slippage_rate)
-                per_share_outflow = fill_price * (Decimal(1) + config.fee_rate)
-                budget = cash * config.allocation
-                shares = int(
-                    (budget / per_share_outflow).to_integral_value(rounding=ROUND_FLOOR)
-                )
+                fill_price = bar.open * (Decimal(1) + (Decimal(0) if zero_cost else config.slippage_rate))
+                budget = cash * (Decimal(1) if mode == 'benchmark100' else Decimal('0.5') if mode == 'benchmark50' else config.allocation)
+                shares = _affordable_shares(budget, fill_price, config) if not zero_cost else int((budget / fill_price).to_integral_value(rounding=ROUND_FLOOR)) // config.lot_size * config.lot_size
                 if shares >= 1:
                     entry_gross = fill_price * shares
-                    entry_fee = entry_gross * config.fee_rate
+                    entry_fee = Decimal(0) if zero_cost else _fee(entry_gross, config.fee_rate, config)
+                    entry_slippage = (fill_price - bar.open) * shares
                     cash -= entry_gross + entry_fee
                     total_fees += entry_fee
+                    total_slippage += entry_slippage
+                    daily_fees += entry_fee
                     position = Position(
                         trade_id=next_trade_id,
                         shares=shares,
+                        entry_shares=shares,
                         entry_signal_date=signal_date,
                         entry_date=bar.trading_date,
                         entry_index=trading_index,
                         entry_price=fill_price,
                         entry_gross=entry_gross,
                         entry_fee=entry_fee,
+                        entry_reference_price=bar.open,
+                        entry_slippage_cost=entry_slippage,
                     )
                     next_trade_id += 1
                 else:
                     insufficient_budget_count += 1
             elif action == "SELL" and position is not None:
-                fill_price = bar.open * (Decimal(1) - config.slippage_rate)
+                fill_price = bar.open * (Decimal(1) - (Decimal(0) if zero_cost else config.slippage_rate))
                 exit_gross = fill_price * position.shares
-                exit_fee = exit_gross * config.fee_rate
-                cash += exit_gross - exit_fee
+                exit_fee = Decimal(0) if zero_cost else _fee(exit_gross, config.sell_fee_rate, config)
+                exit_tax = Decimal(0) if zero_cost else (exit_gross * config.tax_rate).quantize(Decimal('1'), rounding=ROUND_DOWN)
+                total_slippage += (bar.open - fill_price) * position.shares
+                cash += exit_gross - exit_fee - exit_tax
                 total_fees += exit_fee
+                total_tax += exit_tax
+                daily_fees += exit_fee
+                daily_tax += exit_tax
                 closed_trade_net_pnls.append(
-                    exit_gross - exit_fee - position.cash_outflow
+                    exit_gross - exit_fee - exit_tax + position.dividends_received - position.cash_outflow
                 )
+                closed_trade_indexes[position.trade_id] = len(closed_trades)
                 closed_trades.append(
                     _closed_trade(
                         position,
@@ -524,13 +751,15 @@ def _run_engine(
                         exit_index=trading_index,
                         exit_price=fill_price,
                         exit_fee=exit_fee,
+                        exit_tax=exit_tax,
+                        exit_reference_price=bar.open,
                     )
                 )
                 position = None
             pending = None
 
         market_value = bar.close * position.shares if position is not None else Decimal(0)
-        equity = cash + market_value
+        equity = cash + market_value + dividend_receivable
         if equity > peak_equity:
             peak_equity = equity
         drawdown_pct = (
@@ -547,7 +776,13 @@ def _run_engine(
             {
                 "date": bar.trading_date.isoformat(),
                 "cash": _number(cash),
+                "holdings": {config.symbol: position.shares} if position is not None else {},
                 "marketValue": _number(market_value),
+                "dividendReceivable": _number(dividend_receivable),
+                "dailyFees": _number(daily_fees),
+                "dailyTax": _number(daily_tax),
+                "dividendsReceived": _number(daily_dividends),
+                "highWaterMark": _number(peak_equity),
                 "equity": _number(equity),
                 "positionShares": position.shares if position is not None else 0,
                 "close": _number(bar.close),
@@ -562,11 +797,11 @@ def _run_engine(
             currently_long=position is not None,
             close=bar.close,
             moving_average=moving_average,
-        )
+        ) if mode == 'strategy' else 'HOLD'
         if signal != "HOLD":
             pending = (signal, bar.trading_date)
 
-    if not any(
+    if mode == 'strategy' and not any(
         moving_average is not None
         for moving_average in moving_averages[trading_start_index:]
     ):
@@ -576,7 +811,7 @@ def _run_engine(
                 f"MA({config.ma_period}) never becomes available during the requested range.",
             )
         )
-    elif trading_start_index < config.ma_period - 1:
+    elif mode == 'strategy' and trading_start_index < config.ma_period - 1:
         warnings.append(
             _warning(
                 "PARTIAL_MA_WARMUP",
@@ -604,6 +839,8 @@ def _run_engine(
                 "The final open position is valued at the last Close without exit fee or sell slippage; it is not force-liquidated.",
             )
         )
+    if dividend_receivable:
+        warnings.append(_warning('UNPAID_DIVIDEND_RECEIVABLE', f'期末仍有 {_number(dividend_receivable)} 元股息應收未入帳。'))
 
     metrics = _metrics(
         config=config,
@@ -613,10 +850,15 @@ def _run_engine(
         closed_trade_net_pnls=closed_trade_net_pnls,
         position=position,
         cash=cash,
+        dividend_receivable=dividend_receivable,
         total_fees=total_fees,
+        total_tax=total_tax,
+        total_slippage=total_slippage,
         max_drawdown_pct=max_drawdown_pct,
         bars_in_market=bars_in_market,
     )
+    metrics.update(_drawdown_details(equity_curve, config.initial_cash, config.max_drawdown_warning_pct))
+    metrics['totalDividendsReceived'] = _number(total_dividends)
     if max_drawdown_pct > 0 and max_drawdown_pct >= config.max_drawdown_warning_pct:
         warnings.append(
             _warning(
@@ -643,12 +885,21 @@ def run_backtest(
     ma: int = 60,
     allocation: Decimal = Decimal("0.5"),
     fee_rate: Decimal = Decimal("0"),
+    sell_fee_rate: Decimal | None = None,
+    fee_discount: Decimal = Decimal('1'),
+    min_fee: Decimal = Decimal('0'),
+    fee_rounding: str = 'NONE',
+    product_type: str = 'UNSPECIFIED',
+    lot_size: int = 1,
+    tax_rate: Decimal = Decimal('0'),
     slippage_rate: Decimal = Decimal("0"),
     max_drawdown_warning_pct: Decimal = Decimal("20"),
     data_source: str = "local-csv",
     data_version: str | None = None,
     adjustment: str = "unspecified",
     volume_unit: str = "unspecified",
+    actions_path: str | Path | None = None,
+    actions_verified: bool = False,
 ) -> dict[str, Any]:
     """Validate inputs, execute the backtest, and return the versioned result."""
 
@@ -664,6 +915,13 @@ def run_backtest(
         max_drawdown_warning_pct=max_drawdown_warning_pct,
         requested_from=from_date,
         requested_to=to_date,
+        sell_fee_rate=fee_rate if sell_fee_rate is None else sell_fee_rate,
+        fee_discount=fee_discount,
+        min_fee=min_fee,
+        fee_rounding=fee_rounding,
+        product_type=product_type,
+        lot_size=lot_size,
+        tax_rate=tax_rate,
     )
     _validate_config(config)
     source = _validate_text(data_source, "data-source")
@@ -674,6 +932,11 @@ def run_backtest(
     )
     adjustment_value = _validate_text(adjustment, "adjustment")
     volume_unit_value = _validate_text(volume_unit, "volume-unit")
+    if actions_path is not None and adjustment_value not in ('raw', 'unadjusted'):
+        raise BacktestError('corporate actions require raw, unadjusted OHLC; adjusted prices would double count actions')
+    if actions_verified and actions_path is None:
+        raise BacktestError('actions-verified requires an actions CSV')
+    actions, actions_hash = load_actions(actions_path) if actions_path is not None else ([], None)
 
     bars_through_end = [
         bar for bar in bars if to_date is None or bar.trading_date <= to_date
@@ -693,10 +956,36 @@ def run_backtest(
         )
         raise BacktestError(f"CSV has no rows in requested range {requested_range}")
     selected_bars = bars_through_end[trading_start_index:]
+    crosses_0050_split = (
+        config.symbol in ('0050', '0050.TW')
+        and selected_bars[0].trading_date <= date(2025, 6, 10)
+        and selected_bars[-1].trading_date >= date(2025, 6, 18)
+    )
+    if actions_verified and crosses_0050_split and not any(
+        action.kind == 'SPLIT' and action.trading_date == date(2025, 6, 18) and action.ratio == 4
+        for action in actions
+    ):
+        raise BacktestError('verified 0050 actions must include the official 4:1 split on 2025-06-18')
+    trading_dates = {bar.trading_date for bar in selected_bars}
+    for action in actions:
+        if selected_bars[0].trading_date <= action.trading_date <= selected_bars[-1].trading_date and action.trading_date not in trading_dates:
+            raise BacktestError(f'corporate action date {action.trading_date} has no matching trading bar')
 
     engine_result, warnings = _run_engine(
-        bars_through_end, config, trading_start_index
+        bars_through_end, config, trading_start_index, actions=actions
     )
+    benchmark100, _ = _run_engine(bars_through_end, config, trading_start_index, 'benchmark100', actions=actions)
+    benchmark50, _ = _run_engine(bars_through_end, config, trading_start_index, 'benchmark50', actions=actions)
+    no_cost, _ = _run_engine(bars_through_end, config, trading_start_index, zero_cost=True, actions=actions)
+    accounting_status = 'INCOMPLETE' if adjustment_value not in ('raw', 'unadjusted') else 'ASSUMED_COST' if actions_verified and actions_path is not None else 'PENDING_CORPORATE_ACTIONS'
+    if accounting_status != 'ASSUMED_COST':
+        warnings.append(_warning('CORPORATE_ACTIONS_UNVERIFIED', '公司行動、股息與拆股權利尚未核對；資產曲線只是價格序列模擬，並非可對帳的現金紀錄。'))
+    if adjustment_value not in ('raw', 'unadjusted'):
+        warnings.append(_warning('ADJUSTED_PRICE_PROXY', '調整後 OHLC 是合成價格，不能代表歷史可成交價格或實際股數。'))
+    if accounting_status != 'ASSUMED_COST' and crosses_0050_split:
+        warnings.append(_warning('0050_SPLIT_UNRECONCILED', '0050 於 2025-06-18 進行 4:1 分割，尚未以原始價格與持股核對；證交所公告：https://www.twse.com.tw/zh/ETFortune/announcement?company=A00005&date=20250617&fund=0050&seq=1&type=other'))
+    if config.product_type == 'UNSPECIFIED' and config.tax_rate == 0:
+        warnings.append(_warning('SELL_TAX_UNCONFIRMED', '商品種類尚未確認，賣出交易稅可能未計入。'))
     if from_date is not None and from_date < bars[0].trading_date:
         warnings.insert(
             0,
@@ -747,6 +1036,13 @@ def run_backtest(
             "maPeriod": config.ma_period,
             "allocation": _number(config.allocation),
             "feeRate": _number(config.fee_rate),
+            "sellFeeRate": _number(config.sell_fee_rate),
+            "feeDiscount": _number(config.fee_discount),
+            "minFee": _number(config.min_fee),
+            "feeRounding": config.fee_rounding,
+            "productType": config.product_type,
+            "lotSize": config.lot_size,
+            "taxRate": _number(config.tax_rate),
             "slippageRate": _number(config.slippage_rate),
             "maxDrawdownWarningPct": _number(config.max_drawdown_warning_pct),
             "signalTiming": "CLOSE",
@@ -762,6 +1058,12 @@ def run_backtest(
             "sha256": sha256,
             "adjustment": adjustment_value,
             "volumeUnit": volume_unit_value,
+            "timezone": "Asia/Taipei",
+            "columns": list(REQUIRED_COLUMNS),
+            "pricePrecision": "as-provided-by-source",
+            "corporateActionsSha256": actions_hash,
+            "corporateActionsFileName": Path(actions_path).name if actions_path is not None else None,
+            "corporateActionsVerified": actions_verified,
             "rowsInFile": len(bars),
             "rowsInRange": len(selected_bars),
             "warmupRows": trading_start_index,
@@ -771,6 +1073,26 @@ def run_backtest(
             "lastDate": selected_bars[-1].trading_date.isoformat(),
         },
         "metrics": engine_result["metrics"],
+        "noCostMetrics": no_cost['metrics'],
+        "benchmarks": {
+            'buyHold100': benchmark100,
+            'buyHold50': benchmark50,
+        },
+        "accountingStatus": accounting_status,
+        "assumptions": {
+            'brokerFeeSchedule': 'USER_ASSUMPTION_UNVERIFIED',
+            'sellTax': 'user-provided rate; ETF 0.001 or STOCK 0.003 applied by Node API for 2018 onward',
+            'sellTaxSource': 'https://www.etax.nat.gov.tw/etwmain/tax-info/understanding/tax-saving-manual/national/securities-transaction-tax/JNxPwlJ',
+            'sellTaxRuleCheckedAt': '2026-10-05',
+            'sellTaxRounding': 'ROUND_DOWN_TO_TWD',
+            'spread': 'included-in-slippage-assumption',
+            'cashInterestRate': 0,
+            'dividendReinvestment': False,
+            'personalDividendTax': 'EXCLUDED',
+            'operatingCosts': 'EXCLUDED',
+            'endOfPeriod': 'MARK_TO_MARKET_WITHOUT_HYPOTHETICAL_EXIT_COST',
+            'execution': 'daily OHLC next open; no order book or price-limit fill simulation',
+        },
         "equityCurve": engine_result["equityCurve"],
         "trades": engine_result["trades"],
         "warnings": warnings,
@@ -787,6 +1109,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ma", type=_positive_int_arg, default=60)
     parser.add_argument("--allocation", type=_decimal_arg, default=Decimal("0.5"))
     parser.add_argument("--fee-rate", type=_decimal_arg, default=Decimal("0"))
+    parser.add_argument('--sell-fee-rate', type=_decimal_arg)
+    parser.add_argument('--fee-discount', type=_decimal_arg, default=Decimal('1'))
+    parser.add_argument('--min-fee', type=_decimal_arg, default=Decimal('0'))
+    parser.add_argument('--fee-rounding', choices=('NONE', 'FLOOR', 'HALF_UP'), default='NONE')
+    parser.add_argument('--product-type', choices=('ETF', 'STOCK', 'UNSPECIFIED'), default='UNSPECIFIED')
+    parser.add_argument('--lot-size', type=int, default=1)
+    parser.add_argument('--tax-rate', type=_decimal_arg, default=Decimal('0'))
+    parser.add_argument('--actions', help='verified raw-price corporate actions CSV')
+    parser.add_argument('--actions-verified', action='store_true')
     parser.add_argument("--slippage-rate", type=_decimal_arg, default=Decimal("0"))
     parser.add_argument(
         "--max-drawdown-warning-pct", type=_decimal_arg, default=Decimal("20")
@@ -817,12 +1148,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             ma=args.ma,
             allocation=args.allocation,
             fee_rate=args.fee_rate,
+            sell_fee_rate=args.sell_fee_rate,
+            fee_discount=args.fee_discount,
+            min_fee=args.min_fee,
+            fee_rounding=args.fee_rounding,
+            product_type=args.product_type,
+            lot_size=args.lot_size,
+            tax_rate=args.tax_rate,
             slippage_rate=args.slippage_rate,
             max_drawdown_warning_pct=args.max_drawdown_warning_pct,
             data_source=args.data_source,
             data_version=args.data_version,
             adjustment=args.adjustment,
             volume_unit=args.volume_unit,
+            actions_path=args.actions,
+            actions_verified=args.actions_verified,
         )
         sys.stdout.write(
             json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
@@ -839,4 +1179,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

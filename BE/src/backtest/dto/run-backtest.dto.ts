@@ -83,6 +83,52 @@ export class RunBacktestDto {
   @Max(0.1)
   feeRate = 0;
 
+  @ApiPropertyOptional({ default: 'UNSPECIFIED', enum: ['ETF', 'STOCK', 'UNSPECIFIED'] })
+  @IsOptional()
+  @IsIn(['ETF', 'STOCK', 'UNSPECIFIED'])
+  productType: 'ETF' | 'STOCK' | 'UNSPECIFIED' = 'UNSPECIFIED';
+
+  @ApiPropertyOptional({ minimum: 0, maximum: 0.1, description: '賣出手續費率，未填則與買進相同' })
+  @IsOptional()
+  @IsNumber({ allowInfinity: false, allowNaN: false })
+  @Min(0)
+  @Max(0.1)
+  sellFeeRate?: number;
+
+  @ApiPropertyOptional({ default: 1, minimum: 0, maximum: 1 })
+  @IsOptional()
+  @IsNumber({ allowInfinity: false, allowNaN: false })
+  @Min(0)
+  @Max(1)
+  feeDiscount = 1;
+
+  @ApiPropertyOptional({ default: 0, minimum: 0 })
+  @IsOptional()
+  @IsNumber({ allowInfinity: false, allowNaN: false })
+  @Min(0)
+  minFee = 0;
+
+  @ApiPropertyOptional({ default: 'NONE', enum: ['NONE', 'FLOOR', 'HALF_UP'] })
+  @IsOptional()
+  @IsIn(['NONE', 'FLOOR', 'HALF_UP'])
+  feeRounding: 'NONE' | 'FLOOR' | 'HALF_UP' = 'NONE';
+
+  @ApiPropertyOptional({ default: 1, minimum: 1, description: '每筆買進股數須為此數值的倍數' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  lotSize = 1;
+
+  @ApiPropertyOptional({ default: 'UNKNOWN', enum: ['YES', 'NO', 'UNKNOWN'], description: '本區間是否曾參與參數調整' })
+  @IsOptional()
+  @IsIn(['YES', 'NO', 'UNKNOWN'])
+  usedForTuning: 'YES' | 'NO' | 'UNKNOWN' = 'UNKNOWN';
+
+  @ApiPropertyOptional({ default: 'UNKNOWN', enum: ['YES', 'NO', 'UNKNOWN'], description: '是否已人工看過本區間結果' })
+  @IsOptional()
+  @IsIn(['YES', 'NO', 'UNKNOWN'])
+  previouslyViewed: 'YES' | 'NO' | 'UNKNOWN' = 'UNKNOWN';
+
   @ApiPropertyOptional({ default: 0, minimum: 0, maximum: 0.1 })
   @IsOptional()
   @IsNumber({ allowInfinity: false, allowNaN: false })

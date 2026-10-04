@@ -63,6 +63,20 @@ export class PythonBacktestRunner implements OnApplicationShutdown {
       String(request.allocation),
       '--fee-rate',
       String(request.feeRate),
+      '--sell-fee-rate',
+      String(request.sellFeeRate ?? request.feeRate),
+      '--fee-discount',
+      String(request.feeDiscount ?? 1),
+      '--min-fee',
+      String(request.minFee ?? 0),
+      '--fee-rounding',
+      request.feeRounding ?? 'NONE',
+      '--product-type',
+      request.productType ?? 'UNSPECIFIED',
+      '--lot-size',
+      String(request.lotSize ?? 1),
+      '--tax-rate',
+      request.productType === 'ETF' ? '0.001' : request.productType === 'STOCK' ? '0.003' : '0',
       '--slippage-rate',
       String(request.slippageRate),
       '--max-drawdown-warning-pct',
@@ -234,6 +248,13 @@ export class PythonBacktestRunner implements OnApplicationShutdown {
       !this.sameNumber(config.initialCash, request.initialCapital) ||
       !this.sameNumber(config.allocation, request.allocation) ||
       !this.sameNumber(config.feeRate, request.feeRate) ||
+      !this.sameNumber(config.sellFeeRate, request.sellFeeRate ?? request.feeRate) ||
+      !this.sameNumber(config.feeDiscount, request.feeDiscount ?? 1) ||
+      !this.sameNumber(config.minFee, request.minFee ?? 0) ||
+      config.feeRounding !== (request.feeRounding ?? 'NONE') ||
+      config.productType !== (request.productType ?? 'UNSPECIFIED') ||
+      config.lotSize !== (request.lotSize ?? 1) ||
+      !this.sameNumber(config.taxRate, request.productType === 'ETF' ? 0.001 : request.productType === 'STOCK' ? 0.003 : 0) ||
       !this.sameNumber(config.slippageRate, request.slippageRate) ||
       !this.sameNumber(config.maxDrawdownWarningPct, request.maxDrawdownWarningPct) ||
       config.signalTiming !== 'CLOSE' ||
@@ -277,6 +298,28 @@ export class PythonBacktestRunner implements OnApplicationShutdown {
     }
     this.validateEquityCurve(value.equityCurve, data, metrics);
     this.validateTrades(value.trades, data, metrics);
+    if (value.benchmarks !== undefined) {
+      if (!this.isRecord(value.benchmarks)) {
+        throw new PythonRunnerError('INVALID_RESULT', 'Python 基準結果必須是 object');
+      }
+      for (const key of ['buyHold100', 'buyHold50']) {
+        const benchmark = value.benchmarks[key];
+        if (!this.isRecord(benchmark) || !this.isRecord(benchmark.metrics) || !Array.isArray(benchmark.equityCurve)) {
+          throw new PythonRunnerError('INVALID_RESULT', `Python 缺少基準 ${key}`);
+        }
+        this.validateEquityCurve(benchmark.equityCurve, data, benchmark.metrics);
+        for (let index = 0; index < value.equityCurve.length; index++) {
+          const strategyPoint = value.equityCurve[index] as Record<string, unknown>;
+          const benchmarkPoint = benchmark.equityCurve[index] as Record<string, unknown>;
+          if (strategyPoint.date !== benchmarkPoint.date) {
+            throw new PythonRunnerError('INVALID_RESULT', `基準 ${key} 與策略交易日不一致`);
+          }
+        }
+      }
+    }
+    if (value.accountingStatus !== undefined && !['INCOMPLETE', 'PENDING_CORPORATE_ACTIONS', 'ASSUMED_COST'].includes(String(value.accountingStatus))) {
+      throw new PythonRunnerError('INVALID_RESULT', 'Python 會計狀態無效');
+    }
     return value as unknown as PythonBacktestResult;
   }
 

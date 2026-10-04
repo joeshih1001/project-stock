@@ -10,6 +10,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { MarketDataService } from '../market-data/market-data.service';
 import { RunBacktestDto } from './dto/run-backtest.dto';
 import {
@@ -161,6 +162,27 @@ export class BacktestJobService implements OnModuleInit, OnApplicationShutdown {
       await this.repository.update(task);
 
       const result = await this.runner.run(task.request, prepared, abortController.signal);
+      result.manifest = {
+        runId: id,
+        executedAt: new Date().toISOString(),
+        codeVersion: this.codeVersion(),
+        workingTreeDirty: this.workingTreeDirty(),
+        request: task.request,
+        data: result.data,
+        marketData: task.marketData,
+        assumptions: (result as unknown as { assumptions?: unknown }).assumptions,
+        engine: result.engine,
+        strategy: result.strategy,
+        validation: {
+          usedForTuning: task.request.usedForTuning ?? 'UNKNOWN',
+          previouslyViewed: task.request.previouslyViewed === 'YES' ||
+            (task.request.from <= '2025-12-31' && task.request.to >= '2018-01-01') ? 'YES' :
+            task.request.previouslyViewed ?? 'UNKNOWN',
+          trainingPeriod: null,
+          validationPeriod: null,
+          status: 'PENDING_CONFIRMATION',
+        },
+      };
       const latest = await this.repository.find(id);
       if (abortController.signal.aborted || latest?.status === 'cancelled') return;
       await this.repository.saveResult(id, result);
@@ -238,6 +260,14 @@ export class BacktestJobService implements OnModuleInit, OnApplicationShutdown {
       initialCapital: request.initialCapital,
       allocation: request.allocation,
       feeRate: request.feeRate,
+      sellFeeRate: request.sellFeeRate ?? request.feeRate,
+      feeDiscount: request.feeDiscount,
+      minFee: request.minFee,
+      feeRounding: request.feeRounding,
+      productType: request.productType,
+      lotSize: request.lotSize,
+      usedForTuning: request.usedForTuning,
+      previouslyViewed: request.previouslyViewed,
       slippageRate: request.slippageRate,
       maxDrawdownWarningPct: request.maxDrawdownWarningPct,
     };
@@ -282,6 +312,13 @@ export class BacktestJobService implements OnModuleInit, OnApplicationShutdown {
     this.requireFiniteRange('initialCapital', request.initialCapital, 1, Number.MAX_VALUE);
     this.requireFiniteRange('allocation', request.allocation, Number.EPSILON, 1);
     this.requireFiniteRange('feeRate', request.feeRate, 0, 0.1);
+    if (request.sellFeeRate !== undefined) this.requireFiniteRange('sellFeeRate', request.sellFeeRate, 0, 0.1);
+    if (request.feeDiscount !== undefined) this.requireFiniteRange('feeDiscount', request.feeDiscount, 0, 1);
+    if (request.minFee !== undefined) this.requireFiniteRange('minFee', request.minFee, 0, Number.MAX_VALUE);
+    if (request.lotSize !== undefined && (!Number.isInteger(request.lotSize) || request.lotSize < 1)) throw new BadRequestException('lotSize 必須是正整數');
+    if (request.productType !== undefined && request.productType !== 'UNSPECIFIED' && request.from < '2018-01-01') {
+      throw new BadRequestException('內建台股交易稅假設只支援 2018-01-01 起；更早期間需補歷史稅則');
+    }
     this.requireFiniteRange('slippageRate', request.slippageRate, 0, 0.1);
     this.requireFiniteRange(
       'maxDrawdownWarningPct',
@@ -311,5 +348,26 @@ export class BacktestJobService implements OnModuleInit, OnApplicationShutdown {
       throw new Error(`${name} 必須是正整數，收到 ${raw}`);
     }
     return parsed;
+  }
+
+  private codeVersion(): string {
+    if (process.env.GIT_COMMIT) return process.env.GIT_COMMIT;
+    try {
+      return execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  private workingTreeDirty(): boolean | null {
+    try {
+      return execFileSync('git', ['status', '--porcelain'], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim().length > 0;
+    } catch {
+      return null;
+    }
   }
 }

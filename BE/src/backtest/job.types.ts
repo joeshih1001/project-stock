@@ -22,6 +22,14 @@ export interface BacktestRequestSnapshot {
   initialCapital: number;
   allocation: number;
   feeRate: number;
+  sellFeeRate?: number;
+  feeDiscount?: number;
+  minFee?: number;
+  feeRounding?: 'NONE' | 'FLOOR' | 'HALF_UP';
+  productType?: 'ETF' | 'STOCK' | 'UNSPECIFIED';
+  lotSize?: number;
+  usedForTuning?: 'YES' | 'NO' | 'UNKNOWN';
+  previouslyViewed?: 'YES' | 'NO' | 'UNKNOWN';
   slippageRate: number;
   maxDrawdownWarningPct: number;
 }
@@ -57,6 +65,10 @@ export interface PythonBacktestResult {
   equityCurve: unknown[];
   trades: unknown[];
   warnings: string[];
+  accountingStatus?: string;
+  benchmarks?: Record<string, unknown>;
+  noCostMetrics?: Record<string, unknown>;
+  manifest?: Record<string, unknown>;
 }
 
 export interface BacktestTaskView extends BacktestTask {
