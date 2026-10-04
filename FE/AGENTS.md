@@ -49,7 +49,8 @@ src/
 
 ## React 與 TypeScript 規則
 
-- 使用 function components、具名匯出與明確 props types；route framework 有要求時才使用 default export。
+- 元件與一般函式優先使用箭頭函式，並使用具名匯出；route framework 有要求時才使用 default export。
+- 新增 `type` 或 `interface` 時，集中放在該功能目錄的 `type.ts`，包含 component props types；不要在 Component 檔案內定義型別。
 - 優先使用 discriminated unions 表示 `idle | loading | success | empty | error`，避免多個 boolean 產生不可能狀態。
 - 不把可由 props/state 推導的值重複存進 state；`useEffect` 只用於同步外部系統。
 - 商業計算、日期正規化與資料轉換不得寫在 JSX 或圖表元件內，應放在可獨立測試的純函式。

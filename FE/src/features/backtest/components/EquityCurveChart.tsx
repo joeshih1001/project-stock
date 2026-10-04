@@ -1,16 +1,12 @@
 import { useId } from 'react'
 
-import type { BacktestEquityPoint } from '../../../services/backtestApi'
-
-interface EquityCurveChartProps {
-  points: BacktestEquityPoint[]
-}
+import type { EquityCurveChartProps } from '../type'
 
 const numberFormatter = new Intl.NumberFormat('zh-TW', {
   maximumFractionDigits: 0,
 })
 
-export function EquityCurveChart({ points }: EquityCurveChartProps) {
+export const EquityCurveChart = ({ points }: EquityCurveChartProps) => {
   const titleId = useId()
   const descriptionId = useId()
 

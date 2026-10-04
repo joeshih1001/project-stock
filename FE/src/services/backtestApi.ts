@@ -1,210 +1,45 @@
+import type {
+  BacktestConfig,
+  BacktestData,
+  BacktestEquityPoint,
+  BacktestMetrics,
+  BacktestResult,
+  BacktestTask,
+  BacktestTrade,
+  HttpMethod,
+  JsonRecord,
+  MarketDataEntry,
+  RunBacktestRequest,
+  StrategyOption,
+  ValidationContext,
+  ValidationFailure,
+  WaitForTaskOptions,
+} from './type'
+
+export type {
+  BacktestConfig,
+  BacktestData,
+  BacktestEngine,
+  BacktestEquityPoint,
+  BacktestMetrics,
+  BacktestResult,
+  BacktestStrategy,
+  BacktestTask,
+  BacktestTaskError,
+  BacktestTaskPhase,
+  BacktestTaskStatus,
+  BacktestTrade,
+  MarketDataEntry,
+  RunBacktestRequest,
+  StrategyOption,
+  WaitForTaskOptions,
+} from './type'
+
 const DEFAULT_API_BASE_URL = 'http://localhost:5500'
 
 const STRATEGIES_PATH = '/api/strategies'
 const MARKET_DATA_PATH = '/api/market-data'
 const BACKTESTS_PATH = '/api/backtests'
-
-type HttpMethod = 'GET' | 'POST' | 'DELETE'
-type JsonRecord = Record<string, unknown>
-
-interface ValidationContext {
-  readonly endpoint: string
-  readonly source: 'request' | 'response'
-}
-
-export interface StrategyOption {
-  key: string
-  name: string
-  description: string
-  version: string
-  defaultParams: Record<string, number>
-}
-
-export interface MarketDataEntry {
-  symbol: string
-  sourceSymbol: string
-  dataVersion: string
-  source: string
-  adjustmentMode: string
-  volumeUnit: string
-  from: string
-  to: string
-  rows: number
-  fetchedAt: string
-}
-
-export interface RunBacktestRequest {
-  symbol: string
-  from: string
-  to: string
-  strategy: string
-  maPeriod: number
-  initialCapital: number
-  allocation: number
-  feeRate: number
-  slippageRate: number
-  maxDrawdownWarningPct: number
-}
-
-export type BacktestTaskStatus =
-  'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
-
-export type BacktestTaskPhase =
-  'queued' | 'preparing-data' | 'running-python' | 'complete'
-
-export interface BacktestTaskError {
-  code: string
-  message: string
-}
-
-export interface BacktestTask {
-  schemaVersion: 1
-  id: string
-  status: BacktestTaskStatus
-  phase: BacktestTaskPhase
-  request: RunBacktestRequest
-  createdAt: string
-  updatedAt: string
-  startedAt?: string
-  completedAt?: string
-  marketData?: MarketDataEntry
-  error?: BacktestTaskError
-  resultAvailable: boolean
-  links: {
-    self: string
-    result: string
-  }
-}
-
-export interface BacktestEngine {
-  name: string
-  version: string
-  language: 'python'
-  pythonVersion: string
-  endOfPeriodPolicy: 'MARK_TO_MARKET'
-}
-
-export interface BacktestStrategy {
-  key: string
-  name: string
-  version: string
-  params: Record<string, number>
-  description: string
-}
-
-export interface BacktestConfig {
-  symbol: string
-  from: string
-  to: string
-  initialCash: number
-  maPeriod: number
-  allocation: number
-  feeRate: number
-  slippageRate: number
-  maxDrawdownWarningPct: number
-  signalTiming: 'CLOSE'
-  executionTiming: 'NEXT_TRADING_DAY_OPEN'
-  shareSizing: 'WHOLE_SHARES'
-  endOfPeriodPolicy: 'MARK_TO_MARKET'
-}
-
-export interface BacktestData {
-  fileName: string
-  symbol: string
-  source: string
-  version: string
-  sha256: string
-  adjustment: string
-  volumeUnit: string
-  rowsInFile: number
-  rowsInRange: number
-  warmupRows: number
-  fileFirstDate: string
-  fileLastDate: string
-  firstDate: string
-  lastDate: string
-}
-
-export interface BacktestMetrics {
-  initialCash: number
-  finalCash: number
-  finalMarketValue: number
-  finalEquity: number
-  totalPnl: number
-  realizedPnl: number
-  unrealizedPnl: number
-  totalReturnPct: number
-  annualizedReturnPct: number | null
-  maxDrawdownPct: number
-  totalFees: number
-  totalTrades: number
-  closedTrades: number
-  openTrades: number
-  winningTrades: number
-  losingTrades: number
-  winRatePct: number | null
-  profitFactor: number | null
-  exposurePct: number
-  equityPoints: number
-}
-
-export interface BacktestEquityPoint {
-  date: string
-  cash: number
-  marketValue: number
-  equity: number
-  positionShares: number
-  close: number
-  movingAverage: number | null
-  drawdownPct: number
-}
-
-export interface BacktestTrade {
-  tradeId: number
-  status: 'OPEN' | 'CLOSED'
-  shares: number
-  entrySignalDate: string
-  entryDate: string
-  entryPrice: number
-  entryGross: number
-  entryFee: number
-  entryCashOutflow: number
-  exitSignalDate: string | null
-  exitDate: string | null
-  exitPrice: number | null
-  exitGross: number | null
-  exitFee: number | null
-  exitCashInflow: number | null
-  grossPnl: number | null
-  netPnl: number | null
-  returnPct: number | null
-  holdingTradingDays: number | null
-  holdingCalendarDays: number | null
-  exitReason: 'STRATEGY_SIGNAL' | null
-  markDate: string | null
-  markPrice: number | null
-  unrealizedPnl: number | null
-  unrealizedReturnPct: number | null
-}
-
-export interface BacktestResult {
-  schemaVersion: 1
-  symbol: string
-  engine: BacktestEngine
-  strategy: BacktestStrategy
-  config: BacktestConfig
-  data: BacktestData
-  metrics: BacktestMetrics
-  equityCurve: BacktestEquityPoint[]
-  trades: BacktestTrade[]
-  warnings: string[]
-}
-
-export interface WaitForTaskOptions {
-  signal?: AbortSignal
-  pollIntervalMs?: number
-  onUpdate?: (task: BacktestTask) => void
-}
 
 /** HTTP 非成功狀態；保留 status 與 response body 供畫面判斷。 */
 export class HttpError extends Error {
@@ -247,9 +82,9 @@ export class ApiRequestError extends Error {
   }
 }
 
-export async function listStrategies(
+export const listStrategies = async (
   signal?: AbortSignal,
-): Promise<StrategyOption[]> {
+): Promise<StrategyOption[]> => {
   return requestJson(
     'GET',
     STRATEGIES_PATH,
@@ -259,9 +94,9 @@ export async function listStrategies(
   )
 }
 
-export async function listMarketData(
+export const listMarketData = async (
   signal?: AbortSignal,
-): Promise<MarketDataEntry[]> {
+): Promise<MarketDataEntry[]> => {
   return requestJson(
     'GET',
     MARKET_DATA_PATH,
@@ -271,20 +106,20 @@ export async function listMarketData(
   )
 }
 
-export async function createBacktest(
+export const createBacktest = async (
   request: RunBacktestRequest,
   signal?: AbortSignal,
-): Promise<BacktestTask> {
+): Promise<BacktestTask> => {
   const payload = decodeRunBacktestRequest(request)
   return requestJson('POST', BACKTESTS_PATH, signal, payload, (value) =>
     decodeBacktestTask(value, `POST ${BACKTESTS_PATH}`),
   )
 }
 
-export async function getBacktestTask(
+export const getBacktestTask = async (
   taskId: string,
   signal?: AbortSignal,
-): Promise<BacktestTask> {
+): Promise<BacktestTask> => {
   const id = normalizeTaskId(taskId)
   const path = `${BACKTESTS_PATH}/${id}`
   return requestJson('GET', path, signal, undefined, (value) =>
@@ -292,10 +127,10 @@ export async function getBacktestTask(
   )
 }
 
-export async function getBacktestResult(
+export const getBacktestResult = async (
   taskId: string,
   signal?: AbortSignal,
-): Promise<BacktestResult> {
+): Promise<BacktestResult> => {
   const id = normalizeTaskId(taskId)
   const path = `${BACKTESTS_PATH}/${id}/result`
   return requestJson('GET', path, signal, undefined, (value) =>
@@ -303,10 +138,10 @@ export async function getBacktestResult(
   )
 }
 
-export async function cancelBacktest(
+export const cancelBacktest = async (
   taskId: string,
   signal?: AbortSignal,
-): Promise<BacktestTask> {
+): Promise<BacktestTask> => {
   const id = normalizeTaskId(taskId)
   const path = `${BACKTESTS_PATH}/${id}`
   return requestJson('DELETE', path, signal, undefined, (value) =>
@@ -315,10 +150,10 @@ export async function cancelBacktest(
 }
 
 /** 輪詢至 terminal status；AbortSignal 同時中止 HTTP 與等待計時器。 */
-export async function waitForBacktestTask(
+export const waitForBacktestTask = async (
   taskId: string,
   options: WaitForTaskOptions = {},
-): Promise<BacktestTask> {
+): Promise<BacktestTask> => {
   const interval = options.pollIntervalMs ?? 1000
   if (!Number.isFinite(interval) || interval < 0) {
     throw new ApiRequestError(
@@ -342,13 +177,13 @@ export async function waitForBacktestTask(
   }
 }
 
-async function requestJson<T>(
+const requestJson = async <T>(
   method: HttpMethod,
   path: string,
   signal: AbortSignal | undefined,
   body: JsonRecord | undefined,
   decode: (value: unknown) => T,
-): Promise<T> {
+): Promise<T> => {
   const url = `${getApiBaseUrl()}${path}`
   const response = await fetch(url, {
     method,
@@ -373,12 +208,12 @@ async function requestJson<T>(
   return decode(responseBody)
 }
 
-function getApiBaseUrl(): string {
+const getApiBaseUrl = (): string => {
   const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
   return (configuredBaseUrl || DEFAULT_API_BASE_URL).replace(/\/+$/, '')
 }
 
-async function readResponseBody(response: Response): Promise<unknown> {
+const readResponseBody = async (response: Response): Promise<unknown> => {
   const text = await response.text()
   if (text.length === 0) return undefined
   try {
@@ -388,19 +223,19 @@ async function readResponseBody(response: Response): Promise<unknown> {
   }
 }
 
-function createHttpErrorMessage(
+const createHttpErrorMessage = (
   status: number,
   statusText: string,
   method: HttpMethod,
   url: string,
   body: unknown,
-): string {
+): string => {
   const detail = getServerErrorMessage(body)
   const statusLabel = statusText ? `${status} ${statusText}` : String(status)
   return `${method} ${url} 失敗（${statusLabel}）${detail ? `：${detail}` : ''}`
 }
 
-function getServerErrorMessage(body: unknown): string | undefined {
+const getServerErrorMessage = (body: unknown): string | undefined => {
   if (typeof body === 'string') return body || undefined
   if (!isRecord(body)) return undefined
   if (typeof body.message === 'string') return body.message
@@ -413,7 +248,7 @@ function getServerErrorMessage(body: unknown): string | undefined {
   return typeof body.error === 'string' ? body.error : undefined
 }
 
-function decodeStrategies(value: unknown): StrategyOption[] {
+const decodeStrategies = (value: unknown): StrategyOption[] => {
   const context = responseContext(`GET ${STRATEGIES_PATH}`)
   return readArray(value, '$', context).map((item, index) => {
     const path = `$[${index}]`
@@ -436,18 +271,18 @@ function decodeStrategies(value: unknown): StrategyOption[] {
   })
 }
 
-function decodeMarketData(value: unknown): MarketDataEntry[] {
+const decodeMarketData = (value: unknown): MarketDataEntry[] => {
   const context = responseContext(`GET ${MARKET_DATA_PATH}`)
   return readArray(value, '$', context).map((item, index) =>
     decodeMarketDataEntry(item, `$[${index}]`, context),
   )
 }
 
-function decodeMarketDataEntry(
+const decodeMarketDataEntry = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): MarketDataEntry {
+): MarketDataEntry => {
   const record = readRecord(value, path, context)
   return {
     symbol: readNonEmptyString(record.symbol, `${path}.symbol`, context),
@@ -475,7 +310,7 @@ function decodeMarketDataEntry(
   }
 }
 
-function decodeRunBacktestRequest(request: RunBacktestRequest): JsonRecord {
+const decodeRunBacktestRequest = (request: RunBacktestRequest): JsonRecord => {
   const context: ValidationContext = {
     endpoint: `POST ${BACKTESTS_PATH}`,
     source: 'request',
@@ -549,7 +384,7 @@ function decodeRunBacktestRequest(request: RunBacktestRequest): JsonRecord {
   }
 }
 
-function decodeBacktestTask(value: unknown, endpoint: string): BacktestTask {
+const decodeBacktestTask = (value: unknown, endpoint: string): BacktestTask => {
   const context = responseContext(endpoint)
   const record = readRecord(value, '$', context)
   const status = readEnum(record.status, '$.status', context, [
@@ -616,11 +451,11 @@ function decodeBacktestTask(value: unknown, endpoint: string): BacktestTask {
   return task
 }
 
-function decodeRequestSnapshot(
+const decodeRequestSnapshot = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): RunBacktestRequest {
+): RunBacktestRequest => {
   const record = readRecord(value, path, context)
   return {
     symbol: readNonEmptyString(record.symbol, `${path}.symbol`, context),
@@ -672,11 +507,11 @@ function decodeRequestSnapshot(
   }
 }
 
-function decodeTaskLinks(
+const decodeTaskLinks = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): BacktestTask['links'] {
+): BacktestTask['links'] => {
   const record = readRecord(value, path, context)
   return {
     self: readApiPath(record.self, `${path}.self`, context),
@@ -684,10 +519,10 @@ function decodeTaskLinks(
   }
 }
 
-function decodeBacktestResult(
+const decodeBacktestResult = (
   value: unknown,
   endpoint: string,
-): BacktestResult {
+): BacktestResult => {
   const context = responseContext(endpoint)
   const record = readRecord(value, '$', context)
   const engineRecord = readRecord(record.engine, '$.engine', context)
@@ -767,10 +602,10 @@ function decodeBacktestResult(
   return result
 }
 
-function decodeBacktestConfig(
+const decodeBacktestConfig = (
   record: JsonRecord,
   context: ValidationContext,
-): BacktestConfig {
+): BacktestConfig => {
   return {
     symbol: readNonEmptyString(record.symbol, '$.config.symbol', context),
     from: readIsoDate(record.from, '$.config.from', context),
@@ -825,10 +660,10 @@ function decodeBacktestConfig(
   }
 }
 
-function decodeBacktestData(
+const decodeBacktestData = (
   record: JsonRecord,
   context: ValidationContext,
-): BacktestData {
+): BacktestData => {
   return {
     fileName: readFileName(record.fileName, '$.data.fileName', context),
     symbol: readNonEmptyString(record.symbol, '$.data.symbol', context),
@@ -875,10 +710,10 @@ function decodeBacktestData(
   }
 }
 
-function decodeBacktestMetrics(
+const decodeBacktestMetrics = (
   value: unknown,
   context: ValidationContext,
-): BacktestMetrics {
+): BacktestMetrics => {
   const path = '$.metrics'
   const record = readRecord(value, path, context)
   return {
@@ -973,10 +808,10 @@ function decodeBacktestMetrics(
   }
 }
 
-function decodeEquityCurve(
+const decodeEquityCurve = (
   value: unknown,
   context: ValidationContext,
-): BacktestEquityPoint[] {
+): BacktestEquityPoint[] => {
   let previousDate: string | null = null
   return readArray(value, '$.equityCurve', context).map((item, index) => {
     const path = `$.equityCurve[${index}]`
@@ -1015,10 +850,10 @@ function decodeEquityCurve(
   })
 }
 
-function decodeBacktestTrades(
+const decodeBacktestTrades = (
   value: unknown,
   context: ValidationContext,
-): BacktestTrade[] {
+): BacktestTrade[] => {
   return readArray(value, '$.trades', context).map((item, index) => {
     const path = `$.trades[${index}]`
     const record = readRecord(item, path, context)
@@ -1136,7 +971,7 @@ function decodeBacktestTrades(
   })
 }
 
-function normalizeTaskId(value: string): string {
+const normalizeTaskId = (value: string): string => {
   const context: ValidationContext = {
     endpoint: `GET ${BACKTESTS_PATH}/:id`,
     source: 'request',
@@ -1144,135 +979,135 @@ function normalizeTaskId(value: string): string {
   return readUuid(value, '$.taskId', context)
 }
 
-function responseContext(endpoint: string): ValidationContext {
+const responseContext = (endpoint: string): ValidationContext => {
   return { endpoint, source: 'response' }
 }
 
-function readRecord(
+const readRecord = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): JsonRecord {
+): JsonRecord => {
   if (!isRecord(value)) failValidation(context, path, '物件')
   return value
 }
 
-function readArray(
+const readArray = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): unknown[] {
+): unknown[] => {
   if (!Array.isArray(value)) failValidation(context, path, '陣列')
   return value
 }
 
-function readString(
+const readString = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): string {
+): string => {
   if (typeof value !== 'string') failValidation(context, path, '字串')
   return value
 }
 
-function readNonEmptyString(
+const readNonEmptyString = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): string {
+): string => {
   const result = readString(value, path, context)
   if (result.trim().length === 0) failValidation(context, path, '非空字串')
   return result
 }
 
-function readBoolean(
+const readBoolean = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): boolean {
+): boolean => {
   if (typeof value !== 'boolean') failValidation(context, path, '布林值')
   return value
 }
 
-function readFiniteNumber(
+const readFiniteNumber = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): number {
+): number => {
   if (typeof value !== 'number' || !Number.isFinite(value))
     failValidation(context, path, '有限數字')
   return value
 }
 
-function readNullableFiniteNumber(
+const readNullableFiniteNumber = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): number | null {
+): number | null => {
   return value === null ? null : readFiniteNumber(value, path, context)
 }
 
-function readNonNegativeInteger(
+const readNonNegativeInteger = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): number {
+): number => {
   const result = readFiniteNumber(value, path, context)
   if (!Number.isInteger(result) || result < 0)
     failValidation(context, path, '非負整數')
   return result
 }
 
-function readPositiveInteger(
+const readPositiveInteger = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): number {
+): number => {
   const result = readFiniteNumber(value, path, context)
   if (!Number.isInteger(result) || result < 1)
     failValidation(context, path, '正整數')
   return result
 }
 
-function readNullableNonNegativeInteger(
+const readNullableNonNegativeInteger = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): number | null {
+): number | null => {
   return value === null ? null : readNonNegativeInteger(value, path, context)
 }
 
-function readNumberInRange(
+const readNumberInRange = (
   value: unknown,
   path: string,
   context: ValidationContext,
   min: number,
   max: number,
-): number {
+): number => {
   const result = readFiniteNumber(value, path, context)
   if (result < min || result > max)
     failValidation(context, path, `${min} 到 ${max} 之間的數字`)
   return result
 }
 
-function readIntegerInRange(
+const readIntegerInRange = (
   value: unknown,
   path: string,
   context: ValidationContext,
   min: number,
   max: number,
-): number {
+): number => {
   const result = readNumberInRange(value, path, context, min, max)
   if (!Number.isInteger(result))
     failValidation(context, path, `${min} 到 ${max} 之間的整數`)
   return result
 }
 
-function readNumberRecord(
+const readNumberRecord = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): Record<string, number> {
+): Record<string, number> => {
   const record = readRecord(value, path, context)
   return Object.fromEntries(
     Object.entries(record).map(([key, item]) => [
@@ -1282,40 +1117,40 @@ function readNumberRecord(
   )
 }
 
-function readStringArray(
+const readStringArray = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): string[] {
+): string[] => {
   return readArray(value, path, context).map((item, index) =>
     readString(item, `${path}[${index}]`, context),
   )
 }
 
-function readIsoDate(
+const readIsoDate = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): string {
+): string => {
   const result = readString(value, path, context)
   if (!isIsoDate(result))
     failValidation(context, path, '有效的 YYYY-MM-DD 日期')
   return result
 }
 
-function readNullableIsoDate(
+const readNullableIsoDate = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): string | null {
+): string | null => {
   return value === null ? null : readIsoDate(value, path, context)
 }
 
-function readIsoTimestamp(
+const readIsoTimestamp = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): string {
+): string => {
   const result = readString(value, path, context)
   if (
     !/(?:Z|[+-]\d{2}:\d{2})$/.test(result) ||
@@ -1326,11 +1161,11 @@ function readIsoTimestamp(
   return result
 }
 
-function readUuid(
+const readUuid = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): string {
+): string => {
   const result = readString(value, path, context)
   if (
     !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -1342,83 +1177,83 @@ function readUuid(
   return result
 }
 
-function readSha256(
+const readSha256 = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): string {
+): string => {
   const result = readString(value, path, context)
   if (!/^[a-f0-9]{64}$/.test(result))
     failValidation(context, path, '小寫 SHA-256')
   return result
 }
 
-function readFileName(
+const readFileName = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): string {
+): string => {
   const result = readNonEmptyString(value, path, context)
   if (/[\\/]/.test(result)) failValidation(context, path, '不含路徑的檔名')
   return result
 }
 
-function readApiPath(
+const readApiPath = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): string {
+): string => {
   const result = readNonEmptyString(value, path, context)
   if (!result.startsWith('/api/'))
     failValidation(context, path, '以 /api/ 開頭的路徑')
   return result
 }
 
-function readSchemaVersion(
+const readSchemaVersion = (
   value: unknown,
   path: string,
   context: ValidationContext,
-): 1 {
+): 1 => {
   if (value !== 1) failValidation(context, path, '1')
   return 1
 }
 
-function readEnum<const T extends readonly string[]>(
+const readEnum = <const T extends readonly string[]>(
   value: unknown,
   path: string,
   context: ValidationContext,
   values: T,
-): T[number] {
+): T[number] => {
   if (typeof value !== 'string' || !values.includes(value)) {
     failValidation(context, path, values.join('、'))
   }
   return value as T[number]
 }
 
-function readNullableEnum<const T extends readonly string[]>(
+const readNullableEnum = <const T extends readonly string[]>(
   value: unknown,
   path: string,
   context: ValidationContext,
   values: T,
-): T[number] | null {
+): T[number] | null => {
   return value === null ? null : readEnum(value, path, context, values)
 }
 
-function failValidation(
+const failValidation: ValidationFailure = (
   context: ValidationContext,
   path: string,
   expected: string,
-): never {
+) => {
   if (context.source === 'request')
     throw new ApiRequestError(context.endpoint, path, expected)
   throw new ApiResponseError(context.endpoint, path, expected)
 }
 
-function isRecord(value: unknown): value is JsonRecord {
+const isRecord = (value: unknown): value is JsonRecord => {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function isIsoDate(value: string): boolean {
+const isIsoDate = (value: string): boolean => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const parsed = new Date(`${value}T00:00:00Z`)
   return (
@@ -1427,7 +1262,7 @@ function isIsoDate(value: string): boolean {
   )
 }
 
-function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+const delay = (milliseconds: number, signal?: AbortSignal): Promise<void> => {
   if (signal?.aborted) return Promise.reject(createAbortError())
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
@@ -1442,6 +1277,6 @@ function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   })
 }
 
-function createAbortError(): DOMException {
+const createAbortError = (): DOMException => {
   return new DOMException('The operation was aborted.', 'AbortError')
 }

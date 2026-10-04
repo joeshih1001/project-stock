@@ -1,34 +1,21 @@
 import { useRef, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
 
+import type { RunBacktestRequest } from '../../../services/backtestApi'
 import type {
-  MarketDataEntry,
-  RunBacktestRequest,
-  StrategyOption,
-} from '../../../services/backtestApi'
+  BacktestFormProps,
+  BacktestFormSubmitEvent,
+  FieldProps,
+  PercentFieldProps,
+} from '../type'
 
-type MarketDataStatus = 'loading' | 'success' | 'empty' | 'error'
-
-interface BacktestFormProps {
-  strategies: StrategyOption[]
-  marketDataEntries: MarketDataEntry[]
-  marketDataStatus: MarketDataStatus
-  marketDataError?: string
-  isSubmitting: boolean
-  onSubmit: (request: RunBacktestRequest) => Promise<void>
-  onCancel: () => void | Promise<void>
-  onDirty: () => void
-  onRetryMarketData: () => void
-}
-
-function formatDate(date: string): string {
+const formatDate = (date: string): string => {
   return new Intl.DateTimeFormat('zh-TW', {
     dateStyle: 'medium',
     timeZone: 'UTC',
   }).format(new Date(`${date}T00:00:00Z`))
 }
 
-function getTaipeiToday(): string {
+const getTaipeiToday = (): string => {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Taipei',
     year: 'numeric',
@@ -37,12 +24,12 @@ function getTaipeiToday(): string {
   }).format(new Date())
 }
 
-function sourceSymbolFor(symbol: string): string {
+const sourceSymbolFor = (symbol: string): string => {
   const normalized = symbol.trim().toUpperCase()
   return /^\d{4,6}$/.test(normalized) ? `${normalized}.TW` : normalized
 }
 
-export function BacktestForm({
+export const BacktestForm = ({
   strategies,
   marketDataEntries,
   marketDataStatus,
@@ -52,7 +39,7 @@ export function BacktestForm({
   onCancel,
   onDirty,
   onRetryMarketData,
-}: BacktestFormProps) {
+}: BacktestFormProps) => {
   const initialStrategy = strategies.at(0)
   const [symbol, setSymbol] = useState('0050')
   const [from, setFrom] = useState('2018-01-01')
@@ -79,7 +66,7 @@ export function BacktestForm({
   )
   const taipeiToday = getTaipeiToday()
 
-  function clearError(field: string) {
+  const clearError = (field: string) => {
     setErrors((current) => {
       if (!(field in current)) return current
       const next = { ...current }
@@ -88,13 +75,13 @@ export function BacktestForm({
     })
   }
 
-  function updateField(field: string, update: () => void) {
+  const updateField = (field: string, update: () => void) => {
     update()
     clearError(field)
     onDirty()
   }
 
-  function handleStrategyChange(nextKey: string) {
+  const handleStrategyChange = (nextKey: string) => {
     const nextStrategy = strategies.find((strategy) => strategy.key === nextKey)
     setStrategyKey(nextKey)
     setMaPeriod(String(nextStrategy?.defaultParams.maPeriod ?? 60))
@@ -107,7 +94,7 @@ export function BacktestForm({
     onDirty()
   }
 
-  function validate(): RunBacktestRequest | null {
+  const validate = (): RunBacktestRequest | null => {
     const nextErrors: Record<string, string> = {}
     const normalizedSymbol = symbol.trim().toUpperCase()
     const period = Number(maPeriod)
@@ -184,7 +171,7 @@ export function BacktestForm({
     }
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  const handleSubmit = (event: BacktestFormSubmitEvent) => {
     event.preventDefault()
     const request = validate()
     if (request) void onSubmit(request)
@@ -502,14 +489,7 @@ export function BacktestForm({
   )
 }
 
-interface FieldProps {
-  id: string
-  label: string
-  error?: string
-  input: ReactNode
-}
-
-function Field({ id, label, error, input }: FieldProps) {
+const Field = ({ id, label, error, input }: FieldProps) => {
   return (
     <div className="min-w-0">
       <label htmlFor={id} className="field-label">
@@ -525,18 +505,7 @@ function Field({ id, label, error, input }: FieldProps) {
   )
 }
 
-interface PercentFieldProps {
-  id: string
-  label: string
-  value: string
-  error?: string
-  min: string
-  max: string
-  step: string
-  onChange: (value: string) => void
-}
-
-function PercentField({
+const PercentField = ({
   id,
   label,
   value,
@@ -545,7 +514,7 @@ function PercentField({
   max,
   step,
   onChange,
-}: PercentFieldProps) {
+}: PercentFieldProps) => {
   return (
     <Field
       id={id}

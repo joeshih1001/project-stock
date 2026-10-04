@@ -1,5 +1,5 @@
 import { BacktestPage } from './features/backtest/BacktestPage'
 
-export function App() {
+export const App = () => {
   return <BacktestPage />
 }

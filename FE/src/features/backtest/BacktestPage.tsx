@@ -14,18 +14,14 @@ import type {
   StrategyOption,
 } from '../../services/backtestApi'
 import { BacktestForm } from './components/BacktestForm'
-import {
-  BacktestResults,
-  type BacktestRunState,
-} from './components/BacktestResults'
+import { BacktestResults } from './components/BacktestResults'
+import type {
+  BacktestRunState,
+  CatalogMessageProps,
+  ResourceState,
+} from './type'
 
-type ResourceState<T> =
-  | { status: 'loading' }
-  | { status: 'success'; data: T }
-  | { status: 'empty' }
-  | { status: 'error'; message: string }
-
-function getErrorMessage(error: unknown): string {
+const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) return error.message
   if (
     typeof error === 'object' &&
@@ -38,7 +34,7 @@ function getErrorMessage(error: unknown): string {
   return '發生無法辨識的錯誤。'
 }
 
-function isAbortError(error: unknown): boolean {
+const isAbortError = (error: unknown): boolean => {
   return (
     typeof error === 'object' &&
     error !== null &&
@@ -47,7 +43,7 @@ function isAbortError(error: unknown): boolean {
   )
 }
 
-export function BacktestPage() {
+export const BacktestPage = () => {
   const [strategiesState, setStrategiesState] = useState<
     ResourceState<StrategyOption[]>
   >({
@@ -110,17 +106,17 @@ export function BacktestPage() {
 
   useEffect(() => () => runControllerRef.current?.abort(), [])
 
-  function retryStrategies() {
+  const retryStrategies = () => {
     setStrategiesState({ status: 'loading' })
     setStrategiesRequestId((requestId) => requestId + 1)
   }
 
-  function retryMarketData() {
+  const retryMarketData = () => {
     setMarketDataState({ status: 'loading' })
     setMarketDataRequestId((requestId) => requestId + 1)
   }
 
-  async function handleSubmit(request: RunBacktestRequest) {
+  const handleSubmit = async (request: RunBacktestRequest) => {
     runControllerRef.current?.abort()
     const controller = new AbortController()
     runControllerRef.current = controller
@@ -186,7 +182,7 @@ export function BacktestPage() {
     }
   }
 
-  async function handleCancel() {
+  const handleCancel = async () => {
     const controller = runControllerRef.current
     if (!controller || runState.status !== 'loading') return
     cancelRequestedRef.current = true
@@ -213,7 +209,7 @@ export function BacktestPage() {
     }
   }
 
-  function handleFormDirty() {
+  const handleFormDirty = () => {
     if (runState.status === 'success') setIsResultStale(true)
   }
 
@@ -324,13 +320,11 @@ export function BacktestPage() {
   )
 }
 
-interface CatalogMessageProps {
-  title: string
-  description: string
-  onRetry: () => void
-}
-
-function CatalogMessage({ title, description, onRetry }: CatalogMessageProps) {
+const CatalogMessage = ({
+  title,
+  description,
+  onRetry,
+}: CatalogMessageProps) => {
   return (
     <div className="p-5 sm:p-7" role="alert">
       <div className="rounded-2xl border border-warning/30 bg-warning/10 p-5">

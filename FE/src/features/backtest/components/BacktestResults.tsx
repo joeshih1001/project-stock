@@ -1,33 +1,12 @@
-import type {
-  BacktestResult,
-  BacktestTask,
-  BacktestTrade,
-  RunBacktestRequest,
-} from '../../../services/backtestApi'
 import { downloadTradesCsv, tradeCsvFileName } from '../tradesCsv'
+import type {
+  BacktestResultsProps,
+  BacktestRunState,
+  DetailProps,
+  LabelValueProps,
+  TradesTableProps,
+} from '../type'
 import { EquityCurveChart } from './EquityCurveChart'
-
-export type BacktestRunState =
-  | { status: 'idle' }
-  | {
-      status: 'loading'
-      stage: 'submitting' | 'polling' | 'cancelling'
-      request: RunBacktestRequest
-      task?: BacktestTask
-    }
-  | { status: 'cancelled'; request: RunBacktestRequest; task: BacktestTask }
-  | {
-      status: 'success'
-      request: RunBacktestRequest
-      task: BacktestTask
-      result: BacktestResult
-    }
-  | { status: 'error'; request: RunBacktestRequest; message: string }
-
-interface BacktestResultsProps {
-  state: BacktestRunState
-  isStale: boolean
-}
 
 const numberFormatter = new Intl.NumberFormat('zh-TW', {
   maximumFractionDigits: 2,
@@ -38,23 +17,23 @@ const moneyFormatter = new Intl.NumberFormat('zh-TW', {
   maximumFractionDigits: 2,
 })
 
-function formatNumber(value: number | null): string {
+const formatNumber = (value: number | null): string => {
   return value === null ? '—' : numberFormatter.format(value)
 }
 
-function formatMoney(value: number | null): string {
+const formatMoney = (value: number | null): string => {
   return value === null ? '—' : moneyFormatter.format(value)
 }
 
-function formatPercent(value: number | null, showSign = false): string {
+const formatPercent = (value: number | null, showSign = false): string => {
   if (value === null) return '—'
   const sign = showSign && value > 0 ? '+' : ''
   return `${sign}${numberFormatter.format(value)}%`
 }
 
-function loadingLabel(
+const loadingLabel = (
   state: Extract<BacktestRunState, { status: 'loading' }>,
-): string {
+): string => {
   if (state.stage === 'submitting') return '正在建立回測任務'
   if (state.stage === 'cancelling') return '正在取消回測任務'
   if (state.task?.phase === 'preparing-data') return '正在準備行情 CSV'
@@ -62,7 +41,7 @@ function loadingLabel(
   return '任務正在排隊'
 }
 
-export function BacktestResults({ state, isStale }: BacktestResultsProps) {
+export const BacktestResults = ({ state, isStale }: BacktestResultsProps) => {
   if (state.status === 'idle') {
     return (
       <section className="flex min-h-[30rem] min-w-0 items-center justify-center rounded-3xl border border-dashed border-line bg-panel/40 p-7 text-center">
@@ -368,13 +347,7 @@ export function BacktestResults({ state, isStale }: BacktestResultsProps) {
   )
 }
 
-function TradesTable({
-  trades,
-  fileName,
-}: {
-  trades: BacktestTrade[]
-  fileName: string
-}) {
+const TradesTable = ({ trades, fileName }: TradesTableProps) => {
   return (
     <div className="mt-6">
       <div className="mb-3 flex items-end justify-between gap-3">
@@ -472,7 +445,7 @@ function TradesTable({
   )
 }
 
-function MetricDetail({ label, value }: { label: string; value: string }) {
+const MetricDetail = ({ label, value }: LabelValueProps) => {
   return (
     <div>
       <dt className="text-xs text-muted">{label}</dt>
@@ -481,15 +454,7 @@ function MetricDetail({ label, value }: { label: string; value: string }) {
   )
 }
 
-function Detail({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string
-  value: string
-  mono?: boolean
-}) {
+const Detail = ({ label, value, mono = false }: DetailProps) => {
   return (
     <div className="min-w-0">
       <dt>{label}</dt>

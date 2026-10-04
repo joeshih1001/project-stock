@@ -55,9 +55,9 @@ const marketDataResponse = [
   },
 ]
 
-function makeTask(
+const makeTask = (
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled',
-) {
+) => {
   return {
     schemaVersion: 1,
     id: taskId,
@@ -360,11 +360,11 @@ describe('backtestApi', () => {
   })
 })
 
-function jsonResponse(
+const jsonResponse = (
   body: unknown,
   status = 200,
   statusText = 'OK',
-): Response {
+): Response => {
   return new Response(JSON.stringify(body), {
     status,
     statusText,

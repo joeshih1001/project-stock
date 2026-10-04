@@ -12,7 +12,7 @@ const HEADERS = [
   '報酬率 (%)',
 ]
 
-function csvCell(value: string | number | null): string {
+const csvCell = (value: string | number | null): string => {
   if (value === null) return ''
   if (typeof value === 'number')
     return Number.isFinite(value) ? String(value) : ''
@@ -24,7 +24,7 @@ function csvCell(value: string | number | null): string {
 }
 
 /** 匯出畫面上的交易表格；數值保留原始精度，空值維持空白。 */
-export function buildTradesCsv(trades: BacktestTrade[]): string {
+export const buildTradesCsv = (trades: BacktestTrade[]): string => {
   const rows = trades.map((trade) => {
     const isOpen = trade.status === 'OPEN'
     return [
@@ -43,12 +43,12 @@ export function buildTradesCsv(trades: BacktestTrade[]): string {
   return `\uFEFF${[HEADERS, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n')}\r\n`
 }
 
-export function tradeCsvFileName(
+export const tradeCsvFileName = (
   symbol: string,
   from: string,
   to: string,
   taskId: string,
-): string {
+): string => {
   const safePart = (value: string, maxLength: number) =>
     value
       .replace(/[^a-zA-Z0-9_-]/g, '_')
@@ -57,10 +57,10 @@ export function tradeCsvFileName(
   return `backtest-${safePart(symbol, 24) || 'symbol'}-${safePart(from, 10)}-${safePart(to, 10)}-${safePart(taskId, 36)}-trades.csv`
 }
 
-export function downloadTradesCsv(
+export const downloadTradesCsv = (
   trades: BacktestTrade[],
   fileName: string,
-): void {
+): void => {
   const blob = new Blob([buildTradesCsv(trades)], {
     type: 'text/csv;charset=utf-8',
   })

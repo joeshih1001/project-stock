@@ -44,7 +44,7 @@ const marketDataResponse = [
   },
 ]
 
-function makeTask(status: 'queued' | 'running' | 'succeeded' | 'cancelled') {
+const makeTask = (status: 'queued' | 'running' | 'succeeded' | 'cancelled') => {
   return {
     schemaVersion: 1,
     id: taskId,
@@ -166,22 +166,22 @@ const resultResponse = {
   warnings: ['此結果僅供測試。'],
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
+const jsonResponse = (body: unknown, status = 200): Response => {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
 }
 
-function getRequestUrl(input: RequestInfo | URL): string {
+const getRequestUrl = (input: RequestInfo | URL): string => {
   if (typeof input === 'string') return input
   if (input instanceof URL) return input.toString()
   return input.url
 }
 
-function installApiMock(
+const installApiMock = (
   options: { keepRunning?: boolean; trades?: unknown[] } = {},
-) {
+) => {
   const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
     const url = getRequestUrl(input)
     const method = init?.method ?? 'GET'
@@ -320,10 +320,9 @@ describe('App', () => {
       },
     )
     let downloadedFileName = ''
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
-      this: HTMLAnchorElement,
-    ) {
-      downloadedFileName = this.download
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {
+      downloadedFileName =
+        document.querySelector<HTMLAnchorElement>('a[download]')?.download ?? ''
     })
     const user = userEvent.setup()
     render(<App />)
