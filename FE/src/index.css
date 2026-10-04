@@ -1,0 +1,76 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-canvas: #07110e;
+  --color-panel: #0d1b17;
+  --color-line: #223a32;
+  --color-ink: #edf7f2;
+  --color-muted: #9cb7ac;
+  --color-accent: #39e991;
+  --color-positive: #54eca0;
+  --color-warning: #f3c969;
+  --font-sans:
+    Inter, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', ui-sans-serif,
+    system-ui, sans-serif;
+}
+
+@layer components {
+  .field-label {
+    @apply block text-sm font-bold text-ink;
+  }
+
+  .field-label-subtle {
+    @apply block text-xs font-semibold text-muted;
+    overflow-wrap: anywhere;
+  }
+
+  .field-input {
+    @apply min-h-12 w-full min-w-0 rounded-xl border border-line bg-canvas/70 px-4 text-sm text-ink transition outline-none placeholder:text-muted/65 hover:border-muted/70 focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:cursor-wait disabled:opacity-65;
+  }
+
+  .field-help {
+    @apply mt-2 text-xs break-words text-muted;
+    overflow-wrap: anywhere;
+  }
+
+  .field-error {
+    @apply mt-2 text-xs font-medium text-red-300;
+    overflow-wrap: anywhere;
+  }
+
+  .table-cell {
+    @apply px-4 py-3 whitespace-nowrap;
+  }
+}
+
+:root {
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--color-canvas);
+}
+
+body,
+#root {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+::selection {
+  color: var(--color-canvas);
+  background: var(--color-accent);
+}
